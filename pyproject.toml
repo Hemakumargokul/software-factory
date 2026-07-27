@@ -1,0 +1,34 @@
+[project]
+name = "software-factory"
+version = "0.1.0"
+description = "Language-agnostic agentic SDLC orchestrator: LangGraph brain, Claude Agent SDK hands, git safety net, Langfuse flight recorder"
+requires-python = ">=3.11"
+dependencies = [
+    "claude-agent-sdk>=0.1.0",
+    "langgraph>=1.0",
+    "langgraph-checkpoint-sqlite>=2.0",
+    "langfuse>=3.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# Only the orchestrator's own tests run by default. The acceptance suite
+# (tests/acceptance) needs a live product service and is invoked explicitly
+# by the acceptance stage or via `pytest tests/acceptance`.
+testpaths = ["tests/factory"]
+asyncio_mode = "auto"
