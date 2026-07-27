@@ -9,7 +9,14 @@ import pytest
 from factory import claude, git_ops, profiles
 from factory.claude import RoleResult
 from factory.gates import GateViolation, check_entry
-from factory.graph import build_graph, route_after_acceptance, route_after_integrate
+from factory.graph import (
+    MAX_ATTEMPTS,
+    build_graph,
+    route_after_acceptance,
+    route_after_integrate,
+    route_after_rollback,
+    route_after_sync,
+)
 from factory.profiles import ProjectProfile
 from factory.stages.decompose import validate_and_order
 
@@ -48,6 +55,9 @@ CANNED = {
         ]
     },
     "summary": {"summary_markdown": "# Engineering Summary\n\nAll tasks done."},
+    "review": {"verdict": "approve", "concerns": [],
+               "risks": [{"risk": "review-r1", "impact": "low",
+                          "mitigation": "none"}]},
 }
 
 
@@ -67,6 +77,7 @@ def fake_run_role_factory():
             ("Write an engineering specification", "requirements"),
             ("Design the system", "design"),
             ("Decompose this design", "decompose"),
+            ("Review this change as a senior engineer", "review"),
             ("engineering summary for this completed factory run", "summary"),
         ):
             if marker in prompt:
@@ -143,12 +154,18 @@ async def test_full_spine_end_to_end(spine_env):
     summary_path = spine_env / "runs" / "spinetest" / "summary.md"
     assert summary_path.read_text().startswith("# Engineering Summary")
 
-    # Design risks made it into the register
+    # Design AND review risks made it into the register
     assert any(r.get("risk") == "r1" for r in final["risks"])
+    assert any(r.get("risk") == "review-r1" for r in final["risks"])
+
+    # Parallel branches all reported through the merge reducer
+    for branch in ("tests", "policy", "review"):
+        assert final["stage_results"][branch]["status"] == "pass"
 
 
-async def test_verification_failure_routes_to_safe_stop(spine_env, monkeypatch):
-    """A red tests stage must stop the run, not commit broken work."""
+async def test_retry_rollback_replan_safestop(spine_env, monkeypatch):
+    """The M7 done-when: a deliberately failing tests branch retries twice,
+    rolls back, re-plans once, then safe-stops."""
     noop = profiles.PROFILES["noop"]
     failing = ProjectProfile(**{**noop.__dict__, "build_cmd": ("false",)})
     monkeypatch.setitem(profiles.PROFILES, "noop", failing)
@@ -160,24 +177,69 @@ async def test_verification_failure_routes_to_safe_stop(spine_env, monkeypatch):
         {"recursion_limit": 100},
     )
 
-    assert final["stage_results"]["tests"]["status"] == "fail"
-    assert final["stage_results"]["safe_stop"]["failed_stages"] == ["tests"]
+    # 3 attempts per decomposition, 2 decompositions (initial + one re-plan)
+    implement_events = [e for e in final["metric_events"]
+                        if e["stage"] == "implement"]
+    assert [e["payload"]["attempt"] for e in implement_events] == [1, 2, 3, 1, 2, 3]
+    decompose_decisions = [d for d in final["decisions"]
+                           if d["stage"] == "decompose"]
+    assert len(decompose_decisions) == 2
+
+    # Two rollbacks, budget spent to -1, then safe-stop with the reason
+    rollbacks = [e for e in final["metric_events"] if e["kind"] == "rollback"]
+    assert len(rollbacks) == 2
+    assert final["replan_budget"] == -1
+    assert "replan budget exhausted" in final["stage_results"]["safe_stop"]["reason"]
+
+    # Rollback actually restored the tree: no work files, clean status, on main
+    sandbox = final["sandbox"]
+    assert not (spine_env / "sandboxes" / "failtest" / "T1.txt").exists()
+    assert git_ops.git(sandbox, "status", "--porcelain").strip() == ""
+    assert git_ops.git(sandbox, "branch", "--show-current").strip() == "main"
     assert all(t["status"] == "pending" for t in final["tasks"])  # nothing merged
 
 
 class TestRouters:
+    def test_route_after_sync_pass_goes_to_acceptance(self):
+        state = {"stage_results": {"tests": {"status": "pass"},
+                                   "policy": {"status": "pass"},
+                                   "review": {"status": "pass"}},
+                 "attempts": 1}
+        assert route_after_sync(state) == "acceptance"
+
+    def test_route_after_sync_fail_retries_while_attempts_left(self):
+        state = {"stage_results": {"tests": {"status": "fail"},
+                                   "policy": {"status": "pass"}},
+                 "attempts": 1}
+        assert route_after_sync(state) == "implement"
+
+    def test_route_after_sync_fail_exhausted_rolls_back(self):
+        state = {"stage_results": {"tests": {"status": "fail"},
+                                   "policy": {"status": "pass"}},
+                 "attempts": MAX_ATTEMPTS}
+        assert route_after_sync(state) == "rollback"
+
+    def test_route_after_sync_policy_violation_skips_retries(self):
+        state = {"stage_results": {"tests": {"status": "pass"},
+                                   "policy": {"status": "violation"}},
+                 "attempts": 1}  # attempts left, still no retry
+        assert route_after_sync(state) == "rollback"
+
     def test_route_after_acceptance(self):
-        ok = {"stage_results": {"tests": {"status": "pass"},
-                                "acceptance": {"status": "skipped"}}}
+        ok = {"stage_results": {"acceptance": {"status": "skipped"}}}
         assert route_after_acceptance(ok) == "commit"
 
-        failed_tests = {"stage_results": {"tests": {"status": "fail"},
-                                          "acceptance": {"status": "pass"}}}
-        assert route_after_acceptance(failed_tests) == "safe_stop"
+        retry = {"stage_results": {"acceptance": {"status": "fail"}},
+                 "attempts": 1}
+        assert route_after_acceptance(retry) == "implement"
 
-        failed_acceptance = {"stage_results": {"tests": {"status": "pass"},
-                                               "acceptance": {"status": "fail"}}}
-        assert route_after_acceptance(failed_acceptance) == "safe_stop"
+        exhausted = {"stage_results": {"acceptance": {"status": "fail"}},
+                     "attempts": MAX_ATTEMPTS}
+        assert route_after_acceptance(exhausted) == "rollback"
+
+    def test_route_after_rollback_budget(self):
+        assert route_after_rollback({"replan_budget": 0}) == "decompose"
+        assert route_after_rollback({"replan_budget": -1}) == "safe_stop"
 
     def test_route_after_integrate(self):
         tasks = [{"id": "T1"}, {"id": "T2"}]

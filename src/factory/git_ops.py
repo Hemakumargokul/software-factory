@@ -62,6 +62,14 @@ def diff(path: Path | str, base_sha: str) -> str:
     return git(path, "diff", base_sha)
 
 
+def diff_readonly(path: Path | str, base_sha: str) -> str:
+    """Diff WITHOUT staging — safe for concurrent readers (parallel
+    verification branches must not race on index.lock). New files appear
+    only if a prior stage_all/changed_files staged them; the implement
+    stage guarantees that before the fan-out runs."""
+    return git(path, "diff", base_sha)
+
+
 def changed_files(path: Path | str, base_sha: str) -> list[str]:
     """Paths changed since `base_sha`, new files included."""
     stage_all(path)

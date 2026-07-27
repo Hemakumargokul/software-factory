@@ -1,13 +1,18 @@
 from pathlib import Path
 
 import pytest
+from claude_agent_sdk import ResultMessage
 
+from factory import claude
 from factory.claude import (
     JsonExtractionError,
+    RoleConfig,
+    RoleError,
     build_options,
     extract_json,
     implementer_role,
     reasoner_role,
+    run_role,
 )
 
 
@@ -81,3 +86,67 @@ class TestRoleConfigs:
     def test_model_defaults_to_cli_default_when_env_unset(self, monkeypatch):
         monkeypatch.delenv("FACTORY_MODEL_REASONER", raising=False)
         assert reasoner_role().model is None
+
+
+def _result_message(subtype="success", is_error=False, text="ok"):
+    return ResultMessage(
+        subtype=subtype, duration_ms=1, duration_api_ms=1, is_error=is_error,
+        num_turns=1, session_id="s", result=text, total_cost_usd=0.01, usage={},
+    )
+
+
+def _role(model="primary", fallback="backup"):
+    return RoleConfig(
+        name="reasoner", allowed_tools=(), disallowed_tools=(),
+        model=model, fallback_model=fallback, max_turns=1, max_budget_usd=1.0,
+        no_tools=True,
+    )
+
+
+class TestFallbackRetry:
+    def test_execution_error_retries_once_on_fallback_model(self, monkeypatch):
+        models_called = []
+
+        def fake_query(*, prompt, options, transport=None):
+            async def stream():
+                models_called.append(options.model)
+                if len(models_called) == 1:
+                    yield _result_message("error_during_execution", is_error=True)
+                else:
+                    yield _result_message()
+            return stream()
+
+        monkeypatch.setattr(claude, "query", fake_query)
+
+        import asyncio
+        result = asyncio.run(run_role(_role(), "hi"))
+        assert models_called == ["primary", "backup"]
+        assert result.text == "ok"
+
+    def test_budget_and_turn_errors_do_not_fall_back(self, monkeypatch):
+        models_called = []
+
+        def fake_query(*, prompt, options, transport=None):
+            async def stream():
+                models_called.append(options.model)
+                yield _result_message("error_max_turns", is_error=True)
+            return stream()
+
+        monkeypatch.setattr(claude, "query", fake_query)
+
+        import asyncio
+        with pytest.raises(RoleError, match="error_max_turns"):
+            asyncio.run(run_role(_role(), "hi"))
+        assert models_called == ["primary"]  # no second call
+
+    def test_no_fallback_model_propagates_immediately(self, monkeypatch):
+        def fake_query(*, prompt, options, transport=None):
+            async def stream():
+                yield _result_message("error_during_execution", is_error=True)
+            return stream()
+
+        monkeypatch.setattr(claude, "query", fake_query)
+
+        import asyncio
+        with pytest.raises(RoleError, match="error_during_execution"):
+            asyncio.run(run_role(_role(fallback=None), "hi"))

@@ -31,7 +31,8 @@ def _failure_context(state: FactoryState) -> str:
     reports = [
         f"[{name}]\n{result.get('report', '')}"
         for name in ("tests", "acceptance", "policy")
-        if (result := results.get(name)) and result.get("status") == "fail"
+        if (result := results.get(name))
+        and result.get("status") in ("fail", "violation")
     ]
     if not reports:
         return ""
@@ -45,12 +46,16 @@ async def implement(state: FactoryState) -> dict:
     task = state["tasks"][state["task_idx"]]
     sandbox = Path(state["sandbox"])
     profile = get_profile(state["profile"])
+    attempt = state.get("attempts", 0) + 1  # this execution, 1-based
 
-    # First attempt creates the task branch; retries continue on it.
+    # Fresh attempt: (re)create the branch at current HEAD — after a re-plan
+    # a stale branch from the rolled-back decomposition may exist and must
+    # not be resumed. Retry: stay on the branch, keep the uncommitted work
+    # the failure report refers to.
     branch = _work_branch(task["id"])
-    try:
-        git_ops.create_branch(sandbox, branch)
-    except git_ops.GitError:
+    if attempt == 1:
+        git_ops.git(sandbox, "switch", "-C", branch)
+    else:
         git_ops.git(sandbox, "switch", branch)
 
     prompt = IMPLEMENT_TASK_PROMPT.substitute(
@@ -93,6 +98,7 @@ async def implement(state: FactoryState) -> dict:
 
     files = git_ops.changed_files(sandbox, state["base_sha"])
     update = {
+        "attempts": attempt,
         "stage_results": {
             "implement": {"status": "ok", "task": task["id"], "files": files}
         },
@@ -100,7 +106,8 @@ async def implement(state: FactoryState) -> dict:
         "decisions": [
             record_decision(
                 stage="implement",
-                decision=f"{task['id']} implemented: {len(files)} files changed",
+                decision=f"{task['id']} implemented: {len(files)} files changed "
+                f"(attempt {attempt})",
                 rationale=result.text[:500],
             )
         ],
@@ -110,7 +117,7 @@ async def implement(state: FactoryState) -> dict:
                 "implement",
                 ok=True,
                 task=task["id"],
-                attempt=state.get("attempts", 0),
+                attempt=attempt,
                 cost_usd=result.cost_usd,
                 num_turns=result.num_turns,
                 duration_s=round(time.monotonic() - started, 3),

@@ -8,7 +8,7 @@ import time
 from graphlib import CycleError, TopologicalSorter
 
 from factory import gates, tracing
-from factory.claude import DECOMPOSE_PROMPT
+from factory.claude import DECOMPOSE_PROMPT, REPLAN_CONTEXT_PROMPT
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event, record_decision
 
@@ -38,12 +38,25 @@ def validate_and_order(tasks: list[dict]) -> list[dict]:
     return [{**by_id[task_id], "status": "pending"} for task_id in order]
 
 
+def _replan_context(state: FactoryState) -> str:
+    """After a rollback, the new decomposition must know what failed."""
+    replan = (state.get("stage_results") or {}).get("replan")
+    if not replan:
+        return ""
+    return REPLAN_CONTEXT_PROMPT.substitute(
+        failed_task=replan.get("task", "?"),
+        failures=compact(replan.get("failures", {}), limit=3000),
+    )
+
+
 async def decompose(state: FactoryState) -> dict:
     gates.check_entry("decompose", state)
     started = time.monotonic()
 
     prompt = DECOMPOSE_PROMPT.substitute(
-        spec=compact(state["spec"]), design=compact(state["design"])
+        spec=compact(state["spec"]),
+        design=compact(state["design"]),
+        replan_context=_replan_context(state),
     )
     with tracing.stage_span("decompose"):
         data = await run_reasoner("decompose", prompt)

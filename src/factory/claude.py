@@ -127,6 +127,7 @@ $spec
 
 DESIGN:
 $design
+$replan_context
 
 Rules: as few tasks as the scope honestly allows (1-4). Each task must be
 independently verifiable by building and running the test suite. Wire
@@ -175,6 +176,38 @@ FAILURE_CONTEXT_PROMPT = Template("""
 PREVIOUS ATTEMPT FAILED. Fix the code so verification passes.
 Verification report (truncated):
 $report
+""")
+
+REPLAN_CONTEXT_PROMPT = Template("""
+THIS IS A RE-PLAN. The previous decomposition failed at task $failed_task
+and its work was rolled back. Produce a DIFFERENT decomposition that avoids
+the failure below — smaller steps, a different order, or a simpler approach.
+Failure summary:
+$failures
+""")
+
+REVIEW_PROMPT = Template("""\
+Review this change as a senior engineer. You see the diff and the design;
+judge whether the change is correct, safe and consistent with the contract.
+
+TASK: $task_id - $task_title
+
+DESIGN (the contract the change must honor):
+$design
+
+DIFF (working tree vs last integrated state):
+$diff
+
+Concerns are advisory: they become entries in the risk register, they do
+not block the pipeline. Reserve "concerns" for things a human should read
+during the merge review.
+
+Reply with JSON:
+{
+  "verdict": "approve" | "concerns",
+  "concerns": ["specific, actionable observation", ...],
+  "risks": [{"risk": "...", "impact": "...", "mitigation": "..."}]
+}
 """)
 
 SUMMARY_PROMPT = Template("""\
@@ -322,11 +355,41 @@ async def run_role(
 ) -> RoleResult:
     """Run one role invocation to completion and return its result.
 
-    Iterates the message stream, concatenates assistant text, and keeps the
-    terminal ResultMessage for usage/cost. Raises RoleError when the run
-    ends in an error subtype (max turns, budget exceeded, execution error)
-    so callers can trigger fallback or gate logic.
+    Raises RoleError when the run ends in an error subtype (max turns,
+    budget exceeded, execution error). An execution error is retried ONCE
+    on the fallback model before propagating — that is the only subtype a
+    different model can plausibly fix; blown turn/budget caps would just
+    blow again.
     """
+    try:
+        return await _run_role_once(
+            role, prompt, cwd=cwd, system_prompt=system_prompt,
+            can_use_tool=can_use_tool, hooks=hooks,
+        )
+    except RoleError as error:
+        can_fall_back = (
+            role.fallback_model is not None
+            and role.fallback_model != role.model
+            and error.subtype == "error_during_execution"
+        )
+        if not can_fall_back:
+            raise
+        fallback = RoleConfig(**{**role.__dict__, "model": role.fallback_model})
+        return await _run_role_once(
+            fallback, prompt, cwd=cwd, system_prompt=system_prompt,
+            can_use_tool=can_use_tool, hooks=hooks,
+        )
+
+
+async def _run_role_once(
+    role: RoleConfig,
+    prompt: str,
+    *,
+    cwd: Path | None = None,
+    system_prompt: str | None = None,
+    can_use_tool=None,
+    hooks=None,
+) -> RoleResult:
     options = build_options(
         role,
         cwd=cwd,
