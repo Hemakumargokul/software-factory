@@ -1,13 +1,20 @@
-"""The orchestration graph. M7: parallel verification with governance loops.
+"""The orchestration graph. M8: human gates over the M7 governance loops.
 
-bootstrap -> intake -> requirements -> design -> decompose
-  -> implement -> {tests, policy, review}   (one superstep, fan-out)
+bootstrap -> intake -> [clarify?] -> requirements -> GATE -> design -> GATE
+  -> decompose -> implement -> {tests, policy, review}  (fan-out)
   -> sync (defer=True join)
-  -> acceptance -> commit -> integrate -> ... next task or release -> summary
+  -> acceptance -> commit -> MERGE GATE -> integrate
+  -> ... next task or release -> summary
 
 Failure edges: sync/acceptance feed back to implement while attempts last;
-policy violations and exhausted retries roll back to base_sha; rollback
-re-plans through decompose while the budget lasts, then safe-stops.
+policy violations, exhausted retries and rejected merges roll back to
+base_sha; rollback re-plans through decompose while the budget lasts, then
+safe-stops.
+
+Human gates are interrupt-only nodes (stages/human_gates.py): the run
+parks in the checkpointer until `factory approve` resumes it. Revise at a
+gate re-runs the gated stage with the edits and invalidates everything
+derived from it.
 
 Routers are pure sync functions of state — unit-testable without running
 a single stage. The three verification branches only read the working
@@ -21,6 +28,12 @@ from factory.stages.bootstrap import bootstrap
 from factory.stages.commit_stage import commit_stage
 from factory.stages.decompose import decompose
 from factory.stages.design import design
+from factory.stages.human_gates import (
+    clarify,
+    gate_design,
+    gate_merge,
+    gate_requirements,
+)
 from factory.stages.implement import implement
 from factory.stages.intake import intake
 from factory.stages.integrate import integrate
@@ -34,6 +47,7 @@ from factory.stages.tests_stage import tests_stage
 from factory.state import FactoryState, metric_event, record_decision
 
 MAX_ATTEMPTS = 3  # initial implementation plus two retries per task
+CLARIFY_THRESHOLD = 0.5  # intake ambiguity_score at/above this asks a human
 
 
 async def sync(state: FactoryState) -> dict:
@@ -62,12 +76,18 @@ async def safe_stop(state: FactoryState) -> dict:
         for name in ("tests", "policy", "review", "acceptance")
         if (results.get(name) or {}).get("status") in ("fail", "violation")
     ]
+    rejected = [
+        gate
+        for gate in ("gate_requirements", "gate_design")
+        if (results.get(gate) or {}).get("action") == "reject"
+    ]
     replan = results.get("replan")
-    reason = (
-        f"replan budget exhausted after rollback of {replan['task']}"
-        if replan
-        else f"verification failed: {failed or 'unrecoverable state'}"
-    )
+    if rejected:
+        reason = f"human rejected at {rejected[0]}"
+    elif replan:
+        reason = f"replan budget exhausted after rollback of {replan['task']}"
+    else:
+        reason = f"verification failed: {failed or 'unrecoverable state'}"
     return {
         "stage_results": {"safe_stop": {"failed_stages": failed, "reason": reason}},
         "decisions": [
@@ -79,6 +99,45 @@ async def safe_stop(state: FactoryState) -> dict:
             )
         ],
     }
+
+
+def route_after_intake(state: FactoryState) -> str:
+    """Ambiguous requests go to a human once; after answers are folded in,
+    the run proceeds on recorded assumptions rather than looping forever."""
+    results = state.get("stage_results") or {}
+    if results.get("clarify"):
+        return "requirements"
+    score = (results.get("intake") or {}).get("ambiguity_score", 0.0)
+    if state.get("scenario") == "ambiguous" or score >= CLARIFY_THRESHOLD:
+        return "clarify"
+    return "requirements"
+
+
+def _route_after_gate(gate: str, on_approve: str, on_revise: str, on_reject: str):
+    def router(state: FactoryState) -> str:
+        action = ((state.get("stage_results") or {}).get(gate) or {}).get("action")
+        if action == "approve":
+            return on_approve
+        if action == "revise":
+            return on_revise
+        return on_reject
+
+    router.__name__ = f"route_after_{gate}"
+    return router
+
+
+route_after_gate_requirements = _route_after_gate(
+    "gate_requirements", on_approve="design", on_revise="requirements",
+    on_reject="safe_stop",
+)
+route_after_gate_design = _route_after_gate(
+    "gate_design", on_approve="decompose", on_revise="design",
+    on_reject="safe_stop",
+)
+route_after_gate_merge = _route_after_gate(
+    "gate_merge", on_approve="integrate", on_revise="rollback",
+    on_reject="rollback",
+)
 
 
 def route_after_sync(state: FactoryState) -> str:
@@ -127,8 +186,11 @@ def build_graph(checkpointer=None):
 
     builder.add_node("bootstrap", bootstrap)
     builder.add_node("intake", intake)
+    builder.add_node("clarify", clarify)
     builder.add_node("requirements", requirements)
+    builder.add_node("gate_requirements", gate_requirements)
     builder.add_node("design", design)
+    builder.add_node("gate_design", gate_design)
     builder.add_node("decompose", decompose)
     builder.add_node("implement", implement)
     builder.add_node("tests", tests_stage)
@@ -137,6 +199,7 @@ def build_graph(checkpointer=None):
     builder.add_node("sync", sync, defer=True)  # waits for all branches
     builder.add_node("acceptance", acceptance)
     builder.add_node("commit", commit_stage)
+    builder.add_node("gate_merge", gate_merge)
     builder.add_node("integrate", integrate)
     builder.add_node("rollback", rollback)
     builder.add_node("release", release)
@@ -145,9 +208,22 @@ def build_graph(checkpointer=None):
 
     builder.add_edge(START, "bootstrap")
     builder.add_edge("bootstrap", "intake")
-    builder.add_edge("intake", "requirements")
-    builder.add_edge("requirements", "design")
-    builder.add_edge("design", "decompose")
+    builder.add_conditional_edges(
+        "intake", route_after_intake, ["clarify", "requirements"]
+    )
+    builder.add_edge("clarify", "intake")
+    builder.add_edge("requirements", "gate_requirements")
+    builder.add_conditional_edges(
+        "gate_requirements",
+        route_after_gate_requirements,
+        ["design", "requirements", "safe_stop"],
+    )
+    builder.add_edge("design", "gate_design")
+    builder.add_conditional_edges(
+        "gate_design",
+        route_after_gate_design,
+        ["decompose", "design", "safe_stop"],
+    )
     builder.add_edge("decompose", "implement")
 
     # Parallel verification: one superstep out, deferred join back.
@@ -164,7 +240,10 @@ def build_graph(checkpointer=None):
     builder.add_conditional_edges(
         "acceptance", route_after_acceptance, ["commit", "implement", "rollback"]
     )
-    builder.add_edge("commit", "integrate")
+    builder.add_edge("commit", "gate_merge")
+    builder.add_conditional_edges(
+        "gate_merge", route_after_gate_merge, ["integrate", "rollback"]
+    )
     builder.add_conditional_edges(
         "integrate", route_after_integrate, ["implement", "release"]
     )

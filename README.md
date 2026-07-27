@@ -44,8 +44,33 @@ pytest
 
 ## Usage
 
-To be filled in as milestones land: `factory run`, `factory approve`,
-`factory status`, `factory metrics`.
+```bash
+factory run "Build a URL shortener: POST /shorten, GET /{code} redirects"
+```
+
+Every run is a checkpointed thread in `runs/checkpoints.db`. The run pauses
+at each human gate (requirement sign-off, design sign-off, merge to main —
+plus a clarification gate when the request is ambiguous), prints the
+artifact under review, and exits with a run id. From any process, any time
+later:
+
+```bash
+factory status  <run_id>                  # where is the run parked?
+factory approve <run_id>                  # approve the pending gate
+factory approve <run_id> --revise "..."   # request changes / answer clarifications
+factory approve <run_id> --reject         # reject at this gate
+factory approve <run_id> --auto           # approve this and every later gate
+factory run "..." --auto                  # unattended demo mode
+```
+
+A revision at the requirement gate re-runs `requirements` with your edits
+and invalidates the design and task list; a design revision invalidates the
+task list. Rejecting a merge rolls the work back and re-plans with your
+stated reason as context.
+
+Ctrl-C is always a safe stop: every superstep is checkpointed, so nothing
+is lost but the stage that was mid-flight. `factory resume <run_id>`
+continues from the last checkpoint (or re-displays a pending gate).
 
 ## Layout
 

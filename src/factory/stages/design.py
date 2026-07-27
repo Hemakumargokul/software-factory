@@ -3,10 +3,19 @@
 import time
 
 from factory import gates, tracing
-from factory.claude import DESIGN_PROMPT
+from factory.claude import DESIGN_PROMPT, REVISION_CONTEXT_PROMPT
 from factory.profiles import get_profile
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event, record_decision
+
+
+def _revision(state: FactoryState) -> str:
+    gate = (state.get("stage_results") or {}).get("gate_design") or {}
+    if gate.get("action") != "revise":
+        return ""
+    return REVISION_CONTEXT_PROMPT.substitute(
+        gate="design", edits=gate.get("edits", "")
+    )
 
 
 async def design(state: FactoryState) -> dict:
@@ -15,7 +24,9 @@ async def design(state: FactoryState) -> dict:
     profile = get_profile(state["profile"])
 
     prompt = DESIGN_PROMPT.substitute(
-        language=profile.stack_description, spec=compact(state["spec"])
+        language=profile.stack_description,
+        spec=compact(state["spec"]),
+        revision=_revision(state),
     )
     with tracing.stage_span("design"):
         data = await run_reasoner("design", prompt)

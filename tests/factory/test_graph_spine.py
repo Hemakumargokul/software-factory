@@ -1,13 +1,11 @@
-"""M6 spine test: with run_role mocked to canned JSON per stage, the full
-graph runs end to end and produces real commits in a temp sandbox."""
-
-import json
-import re
+"""M6/M7 spine tests: with run_role mocked to canned JSON per stage, the
+full graph runs end to end (through the human gates, auto-approved by the
+gate driver) and produces real commits in a temp sandbox."""
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 
-from factory import claude, git_ops, profiles
-from factory.claude import RoleResult
+from factory import git_ops, profiles
 from factory.gates import GateViolation, check_entry
 from factory.graph import (
     MAX_ATTEMPTS,
@@ -20,112 +18,20 @@ from factory.graph import (
 from factory.profiles import ProjectProfile
 from factory.stages.decompose import validate_and_order
 
-CANNED = {
-    "intake": {
-        "problem": "Build a tiny greeting service.",
-        "assumptions": [],
-        "ambiguity_score": 0.1,
-        "ambiguities": [],
-        "scenario": "greenfield",
-    },
-    "requirements": {
-        "summary": "A greeting service.",
-        "functional_requirements": ["FR1: GET /hello greets"],
-        "non_functional_requirements": [],
-        "acceptance_criteria": ["AC1: GET /hello returns 200"],
-        "out_of_scope": [],
-    },
-    "design": {
-        "architecture": "single controller, no persistence",
-        "components": [{"name": "HelloController", "responsibility": "greet"}],
-        "api_contract": [
-            {"method": "GET", "path": "/hello", "request": "",
-             "response": "message", "status_codes": [200]}
-        ],
-        "data_model": [],
-        "alternatives_considered": ["CLI tool - rejected, spec wants HTTP"],
-        "risks": [{"risk": "r1", "impact": "low", "mitigation": "m1"}],
-    },
-    "decompose": {
-        "tasks": [
-            {"id": "T1", "title": "skeleton", "description": "app skeleton",
-             "depends_on": [], "verify": "build passes"},
-            {"id": "T2", "title": "hello endpoint", "description": "endpoint",
-             "depends_on": ["T1"], "verify": "tests pass"},
-        ]
-    },
-    "summary": {"summary_markdown": "# Engineering Summary\n\nAll tasks done."},
-    "review": {"verdict": "approve", "concerns": [],
-               "risks": [{"risk": "review-r1", "impact": "low",
-                          "mitigation": "none"}]},
-}
+
+def initial_state(run_id: str) -> dict:
+    return {"run_id": run_id, "goal": "greeting service", "profile": "noop",
+            "stage_results": {}, "attempts": 0, "replan_budget": 1}
 
 
-def fake_run_role_factory():
-    """Dispatches on role and prompt markers, mimicking each stage's reply."""
-
-    async def fake_run_role(role, prompt, *, cwd=None, system_prompt=None,
-                            can_use_tool=None, hooks=None):
-        if role.name == "implementer":
-            task_id = re.search(r"TASK (T\d+)", prompt).group(1)
-            (cwd / f"{task_id}.txt").write_text(f"work for {task_id}\n")
-            return RoleResult(text=f"Implemented {task_id}.", session_id="s",
-                              cost_usd=0.01, num_turns=3)
-
-        for marker, key in (
-            ("Normalize this engineering request", "intake"),
-            ("Write an engineering specification", "requirements"),
-            ("Design the system", "design"),
-            ("Decompose this design", "decompose"),
-            ("Review this change as a senior engineer", "review"),
-            ("engineering summary for this completed factory run", "summary"),
-        ):
-            if marker in prompt:
-                return RoleResult(text=json.dumps(CANNED[key]), session_id="s",
-                                  cost_usd=0.005, num_turns=1)
-        raise AssertionError(f"unmatched prompt: {prompt[:120]}")
-
-    return fake_run_role
+def config_for(thread_id: str) -> dict:
+    return {"recursion_limit": 100, "configurable": {"thread_id": thread_id}}
 
 
-@pytest.fixture
-def spine_env(tmp_path, monkeypatch):
-    template = tmp_path / "template"
-    template.mkdir()
-    (template / "README.md").write_text("scaffold\n")
-
-    noop = ProjectProfile(
-        language="noop",
-        stack_description="no-op stack for tests",
-        scaffold_template=template,
-        build_cmd=("true",),
-        test_cmd=("true",),
-        package_cmd=("true",),
-        run_cmd=("sleep", "5"),
-        health_url="http://127.0.0.1:1/health",
-        service_port=1,
-        dependency_files=(),
-        dependency_allowlist=frozenset(),
-        forbidden_patterns=(),
-        protected_globs=(),
-    )
-    monkeypatch.setitem(profiles.PROFILES, "noop", noop)
-    monkeypatch.setenv("FACTORY_SANDBOX_ROOT", str(tmp_path / "sandboxes"))
-    monkeypatch.setenv("FACTORY_ACCEPTANCE_DIR", str(tmp_path / "no-suite"))
-    monkeypatch.setattr(claude, "run_role", fake_run_role_factory())
-
-    import factory.stages.summary as summary_module
-    monkeypatch.setattr(summary_module, "RUNS_DIR", tmp_path / "runs")
-
-    return tmp_path
-
-
-async def test_full_spine_end_to_end(spine_env):
-    graph = build_graph()
-    final = await graph.ainvoke(
-        {"run_id": "spinetest", "goal": "greeting service", "profile": "noop",
-         "stage_results": {}, "attempts": 0, "replan_budget": 1},
-        {"recursion_limit": 100},
+async def test_full_spine_end_to_end(spine_env, gate_driver):
+    graph = build_graph(checkpointer=InMemorySaver())
+    final = await gate_driver(
+        graph, initial_state("spinetest"), config_for("spinetest")
     )
 
     # Both tasks ran, in dependency order, and were integrated
@@ -143,11 +49,11 @@ async def test_full_spine_end_to_end(spine_env):
     # base_sha advanced to the last merge: rollback target is last-known-good
     assert final["base_sha"] == final["head_sha"]
 
-    # Lineage: every stage recorded at least one decision
+    # Lineage: every stage recorded at least one decision, gates included
     stages_seen = {d["stage"] for d in final["decisions"]}
     assert {"bootstrap", "intake", "requirements", "design", "decompose",
-            "implement", "commit", "integrate", "release",
-            "summary"} <= stages_seen
+            "implement", "commit", "integrate", "release", "summary",
+            "gate_requirements", "gate_design", "gate_merge"} <= stages_seen
 
     # Release checklist and generated summary
     assert final["stage_results"]["release"]["ready"] is True
@@ -163,18 +69,16 @@ async def test_full_spine_end_to_end(spine_env):
         assert final["stage_results"][branch]["status"] == "pass"
 
 
-async def test_retry_rollback_replan_safestop(spine_env, monkeypatch):
+async def test_retry_rollback_replan_safestop(spine_env, gate_driver, monkeypatch):
     """The M7 done-when: a deliberately failing tests branch retries twice,
     rolls back, re-plans once, then safe-stops."""
     noop = profiles.PROFILES["noop"]
     failing = ProjectProfile(**{**noop.__dict__, "build_cmd": ("false",)})
     monkeypatch.setitem(profiles.PROFILES, "noop", failing)
 
-    graph = build_graph()
-    final = await graph.ainvoke(
-        {"run_id": "failtest", "goal": "greeting service", "profile": "noop",
-         "stage_results": {}, "attempts": 0, "replan_budget": 1},
-        {"recursion_limit": 100},
+    graph = build_graph(checkpointer=InMemorySaver())
+    final = await gate_driver(
+        graph, initial_state("failtest"), config_for("failtest")
     )
 
     # 3 attempts per decomposition, 2 decompositions (initial + one re-plan)

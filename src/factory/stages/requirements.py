@@ -3,9 +3,18 @@
 import time
 
 from factory import gates, tracing
-from factory.claude import REQUIREMENTS_PROMPT
+from factory.claude import REQUIREMENTS_PROMPT, REVISION_CONTEXT_PROMPT
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event, record_decision
+
+
+def _revision(state: FactoryState) -> str:
+    gate = (state.get("stage_results") or {}).get("gate_requirements") or {}
+    if gate.get("action") != "revise":
+        return ""
+    return REVISION_CONTEXT_PROMPT.substitute(
+        gate="requirements", edits=gate.get("edits", "")
+    )
 
 
 async def requirements(state: FactoryState) -> dict:
@@ -15,6 +24,7 @@ async def requirements(state: FactoryState) -> dict:
     prompt = REQUIREMENTS_PROMPT.substitute(
         goal=state["goal"],
         intake=compact(state["stage_results"]["intake"]),
+        revision=_revision(state),
     )
     with tracing.stage_span("requirements"):
         spec = await run_reasoner("requirements", prompt)

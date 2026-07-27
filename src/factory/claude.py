@@ -58,6 +58,7 @@ Normalize this engineering request and classify it.
 
 REQUEST:
 $goal
+$clarifications
 
 Score ambiguity from 0.0 (fully specified) to 1.0 (impossible to act on
 without answers). List concrete ambiguities a human must resolve — questions
@@ -83,6 +84,7 @@ $intake
 
 ORIGINAL REQUEST:
 $goal
+$revision
 
 Acceptance criteria must be black-box observable — statements a tester can
 verify over HTTP without reading the code.
@@ -102,6 +104,7 @@ Design the system for this specification. Target stack: $language.
 
 SPECIFICATION:
 $spec
+$revision
 
 Constraints: single deployable service; embedded database only; every
 dependency beyond the pre-approved starter set is a governance event, so
@@ -184,6 +187,19 @@ and its work was rolled back. Produce a DIFFERENT decomposition that avoids
 the failure below — smaller steps, a different order, or a simpler approach.
 Failure summary:
 $failures
+""")
+
+CLARIFICATIONS_PROMPT = Template("""
+HUMAN CLARIFICATIONS (authoritative answers to earlier ambiguities —
+treat them as part of the request):
+$answers
+""")
+
+REVISION_CONTEXT_PROMPT = Template("""
+HUMAN REVISION at the $gate gate. The previous version was rejected with
+these edits — they are authoritative and override anything they conflict
+with:
+$edits
 """)
 
 REVIEW_PROMPT = Template("""\

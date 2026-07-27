@@ -15,7 +15,7 @@ from factory.state import FactoryState, metric_event, record_decision
 
 def _failure_summary(state: FactoryState) -> dict:
     results = state.get("stage_results") or {}
-    return {
+    failures = {
         name: {
             "status": result.get("status"),
             "report": (result.get("report") or "")[-2000:],
@@ -24,6 +24,15 @@ def _failure_summary(state: FactoryState) -> dict:
         if (result := results.get(name))
         and result.get("status") in ("fail", "violation")
     }
+    # A human merge rejection reaches rollback with all verifications green;
+    # the stated reason is the failure the re-plan must address.
+    gate = results.get("gate_merge") or {}
+    if gate.get("action") == "reject":
+        failures["human_merge_rejection"] = {
+            "status": "rejected",
+            "report": gate.get("edits") or "merge rejected at the human gate",
+        }
+    return failures
 
 
 async def rollback(state: FactoryState) -> dict:
@@ -50,6 +59,7 @@ async def rollback(state: FactoryState) -> dict:
             "review": None,
             "acceptance": None,
             "implement": None,
+            "gate_merge": None,
         },
         "decisions": [
             record_decision(
