@@ -299,11 +299,11 @@ Day 3: ambiguity detection and clarification, both re-plan triggers with downstr
 
 ## Implementation checklist
 
-- [ ] Scaffold the orchestrator package, dependencies, `.env.example` and README skeleton; document the stale `ANTHROPIC_API_KEY` precedence trap
+- [x] Scaffold the orchestrator package, dependencies, `.env.example` and README skeleton; document the stale `ANTHROPIC_API_KEY` precedence trap
 - [ ] `state.py`: keyed stage-results dict with a merge reducer that supports invalidation, append-only lineage fields for decisions, audit and metric events, a risk register; `Decision` records carrying stage, rationale, alternatives, commit SHA and trace id
 - [ ] `git_ops.py`: init with initial commit, commit with trace-id trailer, diff, reset, merge; every call returns a SHA
 - [ ] `claude.py`: the three SDK roles with per-role model, fallback model, turn and budget caps
-- [ ] `profiles.py` and `templates/java-springboot/`: the language profile with build, test, package and run commands, per-language policy patterns, dependency allowlist, and the Maven wrapper skeleton seeded at bootstrap
+- [x] `profiles.py` and `templates/java-springboot/`: the language profile with build, test, package and run commands, per-language policy patterns, dependency allowlist, and the Maven wrapper skeleton seeded at bootstrap
 - [ ] `permissions.py` and `policy_rules.py`: sandbox confinement, profile-defined protected paths, secret scanning, pom.xml dependency allowlist, per-language forbidden constructs; denials recorded as audit events
 - [ ] `verify.py`: the profile's build and test commands with hard timeouts and output truncation, plus the acceptance service lifecycle: package, start, health poll, HTTP suite, teardown in a finally block
 - [ ] `gates.py`: per-stage entry and exit predicates including the task-dependency entry check for `implement`, plus the high-impact action list driving human approval
