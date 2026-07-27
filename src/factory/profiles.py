@@ -26,6 +26,10 @@ class ProjectProfile:
     dependency_allowlist: frozenset[str]
     forbidden_patterns: tuple[str, ...]
     protected_globs: tuple[str, ...]
+    # Optional external scanners (names from policy_rules.EXTERNAL_SCANNERS).
+    # Run on top of the built-in regex scanners, never instead of them;
+    # a missing binary means the scanner is skipped, not a failed run.
+    external_scanners: tuple[str, ...] = ()
     first_build_timeout_s: int = 600
     build_timeout_s: int = 180
 
@@ -58,6 +62,7 @@ JAVA_SPRINGBOOT = ProjectProfile(
         r"\bURLClassLoader\b",
     ),
     protected_globs=(),
+    external_scanners=("gitleaks",),
 )
 
 PROFILES: dict[str, ProjectProfile] = {

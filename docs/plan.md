@@ -190,7 +190,7 @@ class FactoryState(TypedDict):
 
 - Sandbox confinement: no path outside `/tmp/factory/<run_id>`
 - Protected paths: profile-defined globs; the acceptance suite needs none because it lives outside the sandbox entirely
-- Secret scanning: no credential-shaped strings in the diff
+- Secret scanning: two layers — built-in regexes over added diff lines (the deterministic, zero-dependency floor) plus optional external scanners named by the profile (`gitleaks` for the demo profile, run with `--redact` against the sandbox tree). A missing scanner binary degrades to the baseline and is recorded as skipped in the audit trail, never silently
 - Dependency allowlist: new `pom.xml` coordinates must be on the profile's list (Spring Boot starters, H2, JUnit), otherwise it is a high-impact action needing approval
 - Forbidden constructs, per language from the profile; the Java set is `Runtime.getRuntime().exec`, `ProcessBuilder`, `System.exit` and reflection-based classloading in generated product code
 - Change control: main is only reachable through `integrate`, which requires an approved merge gate
@@ -300,15 +300,15 @@ Day 3: ambiguity detection and clarification, both re-plan triggers with downstr
 ## Implementation checklist
 
 - [x] Scaffold the orchestrator package, dependencies, `.env.example` and README skeleton; document the stale `ANTHROPIC_API_KEY` precedence trap
-- [ ] `state.py`: keyed stage-results dict with a merge reducer that supports invalidation, append-only lineage fields for decisions, audit and metric events, a risk register; `Decision` records carrying stage, rationale, alternatives, commit SHA and trace id
-- [ ] `git_ops.py`: init with initial commit, commit with trace-id trailer, diff, reset, merge; every call returns a SHA
-- [ ] `claude.py`: the three SDK roles with per-role model, fallback model, turn and budget caps
+- [x] `state.py`: keyed stage-results dict with a merge reducer that supports invalidation, append-only lineage fields for decisions, audit and metric events, a risk register; `Decision` records carrying stage, rationale, alternatives, commit SHA and trace id
+- [x] `git_ops.py`: init with initial commit, commit with trace-id trailer, diff, reset, merge; every call returns a SHA
+- [x] `claude.py`: the three SDK roles with per-role model, fallback model, turn and budget caps
 - [x] `profiles.py` and `templates/java-springboot/`: the language profile with build, test, package and run commands, per-language policy patterns, dependency allowlist, and the Maven wrapper skeleton seeded at bootstrap
-- [ ] `permissions.py` and `policy_rules.py`: sandbox confinement, profile-defined protected paths, secret scanning, pom.xml dependency allowlist, per-language forbidden constructs; denials recorded as audit events
+- [x] `permissions.py` and `policy_rules.py`: sandbox confinement, profile-defined protected paths, secret scanning (built-in regexes plus optional gitleaks), pom.xml dependency allowlist, per-language forbidden constructs; denials recorded as audit events
 - [ ] `verify.py`: the profile's build and test commands with hard timeouts and output truncation, plus the acceptance service lifecycle: package, start, health poll, HTTP suite, teardown in a finally block
 - [ ] `gates.py`: per-stage entry and exit predicates including the task-dependency entry check for `implement`, plus the high-impact action list driving human approval
 - [ ] `docker-compose.langfuse.yml`: six services, headless init with fixed dev keys, only port 3000 published
-- [ ] `tracing.py`: no-op guard, callback handler, generation spans per role, tool spans from the PreToolUse hook
+- [x] `tracing.py`: no-op guard, callback handler, generation spans per role, tool spans from the PreToolUse hook
 - [ ] `metrics.py`: success rate, retry and rollback frequency, MTTR, end-to-end latency; SQLite persistence, Langfuse scores, CLI report
 - [ ] `tests/factory/`: orchestrator unit tests with the SDK roles mocked, covering gates, policy, metrics, git ops and routing; no auth, Docker or network needed
 - [ ] Sequential spine proven end-to-end on a trivial goal

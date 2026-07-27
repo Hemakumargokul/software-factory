@@ -10,9 +10,14 @@ iteration's problem, and flagging it would make every retry noisier than
 the last.
 """
 
+import json
 import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
-from typing import Iterable, Iterator
+from pathlib import Path
+from typing import Callable, Iterable, Iterator
 
 
 @dataclass(frozen=True)
@@ -132,9 +137,107 @@ def scan_all(
     dependency_files: Iterable[str],
     dependency_allowlist: frozenset[str] | set[str],
 ) -> list[Violation]:
-    """Every scanner over one diff; the policy stage calls just this."""
+    """Every diff scanner in one call; the policy stage calls just this."""
     return [
         *scan_secrets(diff),
         *scan_forbidden(diff, forbidden_patterns),
         *scan_dependencies(diff, dependency_files, dependency_allowlist),
     ]
+
+
+# --- External scanners -----------------------------------------------------
+# Real scanner binaries layered ON TOP of the regex baseline above, never
+# instead of it: the regexes are the deterministic zero-dependency floor,
+# the external tools add breadth (gitleaks ships hundreds of secret rules).
+# A scanner whose binary is missing returns None and is reported as skipped,
+# so testers without the tool still get the baseline.
+
+
+def scan_gitleaks(sandbox: Path) -> list[Violation] | None:
+    """Scan the sandbox tree with gitleaks; None if the binary is missing.
+
+    Runs with --redact so the report (and our Violations) never contain the
+    secret itself. Scans the whole tree rather than the diff — broader than
+    the added-lines rule the regexes follow, which is fine: a secret is a
+    violation wherever it sits.
+    """
+    binary = shutil.which("gitleaks")
+    if binary is None:
+        return None
+
+    with tempfile.TemporaryDirectory() as tmp:
+        report_path = Path(tmp) / "report.json"
+        result = subprocess.run(
+            [
+                binary,
+                "dir",
+                str(sandbox),
+                "--no-banner",
+                "--redact",
+                "--report-format",
+                "json",
+                "--report-path",
+                str(report_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        # gitleaks exit codes: 0 = clean, 1 = leaks found; anything else is
+        # a real failure that must not pass silently as "clean".
+        if result.returncode == 0:
+            return []
+        if result.returncode != 1:
+            raise RuntimeError(
+                f"gitleaks failed (exit {result.returncode}): {result.stderr.strip()}"
+            )
+        findings = json.loads(report_path.read_text())
+
+    violations = []
+    for finding in findings:
+        file = finding.get("File", "")
+        try:
+            file = str(Path(file).relative_to(sandbox))
+        except ValueError:
+            pass
+        violations.append(
+            Violation(
+                rule="secret",
+                detail=f"gitleaks:{finding.get('RuleID', 'unknown')}",
+                file=file or None,
+                line=f"line {finding.get('StartLine', '?')} (redacted)",
+            )
+        )
+    return violations
+
+
+EXTERNAL_SCANNERS: dict[str, Callable[[Path], list[Violation] | None]] = {
+    "gitleaks": scan_gitleaks,
+}
+
+
+def scan_external(
+    sandbox: Path, scanners: Iterable[str]
+) -> tuple[list[Violation], list[str]]:
+    """Run the profile's external scanners against the sandbox tree.
+
+    Returns (violations, skipped) where skipped names scanners whose binary
+    is not installed — the policy stage records those so a degraded scan is
+    visible in the audit trail, not silent.
+    """
+    violations: list[Violation] = []
+    skipped: list[str] = []
+    for name in scanners:
+        try:
+            runner = EXTERNAL_SCANNERS[name]
+        except KeyError:
+            raise ValueError(
+                f"Unknown external scanner {name!r}. "
+                f"Available: {sorted(EXTERNAL_SCANNERS)}"
+            ) from None
+        result = runner(sandbox)
+        if result is None:
+            skipped.append(name)
+        else:
+            violations.extend(result)
+    return violations, skipped

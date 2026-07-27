@@ -20,6 +20,8 @@ See [docs/plan.md](docs/plan.md) for the design and
 - JDK 21+ (Maven is not required; the wrapper ships in the scaffold template)
 - Claude Code auth: `claude /login` with a Pro/Max subscription, or `ANTHROPIC_API_KEY`
 - Docker (optional, only for Langfuse tracing)
+- gitleaks (optional, `brew install gitleaks`) — extra secret-scanning layer
+  in the policy stage; without it the built-in regex scanners still run
 
 > Auth gotcha: a set `ANTHROPIC_API_KEY` (even a stale one) silently
 > overrides subscription auth in non-interactive mode. If you hit

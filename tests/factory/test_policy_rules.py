@@ -1,6 +1,12 @@
+import shutil
+
+import pytest
+
+from factory import policy_rules
 from factory.policy_rules import (
     scan_all,
     scan_dependencies,
+    scan_external,
     scan_forbidden,
     scan_secrets,
 )
@@ -157,3 +163,51 @@ class TestScanAll:
             )
             == []
         )
+
+
+# Realistic-shaped fake credential, assembled at runtime so this repo never
+# contains a scannable secret literal. NOTE: gitleaks' default config
+# allowlists well-known documentation keys (anything with "EXAMPLE"), so
+# test fixtures must not reuse those.
+FAKE_GITHUB_PAT = "ghp_" + "wWPw5k4aXcaT4fNP0UcnZwJUVFk6LO" + "0pINUx"
+
+gitleaks_installed = pytest.mark.skipif(
+    shutil.which("gitleaks") is None, reason="gitleaks binary not installed"
+)
+
+
+class TestScanExternal:
+    def test_profile_declares_gitleaks(self):
+        assert "gitleaks" in PROFILE.external_scanners
+
+    def test_unknown_scanner_name_fails_fast(self, tmp_path):
+        with pytest.raises(ValueError, match="Unknown external scanner"):
+            scan_external(tmp_path, ["nonexistent-scanner"])
+
+    def test_missing_binary_reported_as_skipped(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(policy_rules.shutil, "which", lambda name: None)
+        violations, skipped = scan_external(tmp_path, ["gitleaks"])
+        assert violations == []
+        assert skipped == ["gitleaks"]
+
+    @gitleaks_installed
+    def test_planted_secret_found_and_redacted(self, tmp_path):
+        (tmp_path / "Config.java").write_text(
+            f'String token = "{FAKE_GITHUB_PAT}";\n'
+        )
+
+        violations, skipped = scan_external(tmp_path, PROFILE.external_scanners)
+
+        assert skipped == []
+        assert len(violations) == 1
+        violation = violations[0]
+        assert violation.rule == "secret"
+        assert violation.detail == "gitleaks:github-pat"
+        assert violation.file == "Config.java"  # relative to the sandbox
+        # --redact must keep the credential out of every violation field
+        assert FAKE_GITHUB_PAT not in repr(violation)
+
+    @gitleaks_installed
+    def test_clean_tree_passes(self, tmp_path):
+        (tmp_path / "Main.java").write_text("public class Main {}\n")
+        assert scan_external(tmp_path, PROFILE.external_scanners) == ([], [])
