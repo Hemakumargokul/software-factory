@@ -9,5 +9,6 @@ trap 'rm -rf "$WORK"' EXIT
 
 cp -R "$REPO_ROOT/templates/java-springboot/." "$WORK/"
 echo "priming Maven cache (first run downloads dependencies; be patient)..."
-(cd "$WORK" && ./mvnw -q -B package -DskipTests)
+# `test`, not `package`: the bare template has no main class to repackage.
+(cd "$WORK" && ./mvnw -q -B test)
 echo "Maven cache primed."

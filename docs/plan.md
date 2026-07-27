@@ -316,6 +316,6 @@ Day 3: ambiguity detection and clarification, both re-plan triggers with downstr
 - [x] Bounded retries, model fallback, rollback, safe-stop, and both re-plan triggers: failure-driven and gate-revision-driven, with downstream invalidation
 - [x] Human approval interrupts at requirement sign-off, design sign-off and merge, with checkpointer and approval CLI
 - [x] Ambiguity detection in intake with a clarification interrupt
-- [ ] Hand-written black-box HTTP acceptance suite (pytest plus httpx, with a service lifecycle fixture) for the shortener API contract, encoding security behavior: URL scheme allowlist, collision handling, rate limiting
+- [x] Hand-written black-box HTTP acceptance suite (pytest plus httpx, with a service lifecycle fixture) for the shortener API contract, encoding security behavior: URL scheme allowlist, collision handling, rate limiting
 - [ ] The three scenario runs captured as committed artifacts, including one gate revision demonstrating upstream-change re-planning
 - [ ] Architecture overview, setup instructions, testing approach with limitations and trade-offs, final engineering summary

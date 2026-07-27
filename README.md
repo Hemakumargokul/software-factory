@@ -11,8 +11,11 @@ is the flight recorder.
 The factory is language-agnostic through project profiles. The demo profile
 builds a Java Spring Boot URL shortener.
 
-See [docs/plan.md](docs/plan.md) for the design and
-[docs/implementation-plan.md](docs/implementation-plan.md) for the build plan.
+Start with [docs/architecture.md](docs/architecture.md) (the system as
+built), then [docs/testing-approach.md](docs/testing-approach.md).
+[docs/plan.md](docs/plan.md) and
+[docs/implementation-plan.md](docs/implementation-plan.md) are the original
+design and build plans.
 
 ## Prerequisites
 
@@ -71,6 +74,40 @@ stated reason as context.
 Ctrl-C is always a safe stop: every superstep is checkpointed, so nothing
 is lost but the stage that was mid-flight. `factory resume <run_id>`
 continues from the last checkpoint (or re-displays a pending gate).
+
+After a run:
+
+```bash
+factory metrics                # index of all runs
+factory metrics <run_id>       # success rate, retries, rollbacks, MTTR, latency
+```
+
+## Observability (optional)
+
+```bash
+docker compose -f docker-compose.langfuse.yml up -d
+```
+
+That is the entire setup: the compose file pre-seeds the org, project, API
+keys (matching `.env.example`) and a login — factory@example.com /
+factory-dev-password at http://localhost:3000. Every run becomes a session
+with stage spans, generation spans (model, tokens, cost), a span for every
+tool call the implementer attempted (denials flagged), and reliability
+scores. Without Docker the factory runs identically; tracing degrades to a
+no-op. `scripts/langfuse_smoke.py` produces a full demo trace without
+spending Claude quota.
+
+## The three scenarios
+
+```bash
+scenarios/prime.sh                                   # warm the Maven cache once
+scenarios/greenfield.sh                              # build the URL shortener
+scenarios/brownfield.sh /tmp/factory/<greenfield-id> # extend it (incl. a design-gate revision)
+scenarios/ambiguous.sh  /tmp/factory/<greenfield-id> # "Make it more reliable."
+```
+
+Each captures its artifacts (run log, sandbox commit graph, engineering
+summary, metrics, trace pointer) into `scenarios/artifacts/<name>/`.
 
 ## Layout
 
