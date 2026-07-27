@@ -20,6 +20,9 @@ from langgraph.types import Command
 from rich.console import Console
 from rich.panel import Panel
 
+from rich.table import Table
+
+from factory import metrics as metrics_module
 from factory import tracing
 from factory.graph import build_graph
 
@@ -106,6 +109,65 @@ def status(run_id: str):
     asyncio.run(_status(run_id))
 
 
+@app.command()
+def metrics(run_id: str = typer.Argument(None)):
+    """Reliability metrics: one run's report, or the run index."""
+    if run_id is None:
+        table = Table(title="factory runs")
+        for column in ("run_id", "started", "outcome", "scenario", "goal"):
+            table.add_column(column)
+        for row in metrics_module.list_runs():
+            table.add_row(
+                row["run_id"], row["started"], row["outcome"],
+                row["scenario"], (row["goal"] or "")[:60],
+            )
+        console.print(table)
+        return
+
+    try:
+        report = metrics_module.compute(run_id)
+    except KeyError as error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(1)
+
+    table = Table(title=f"run {run_id} — {report.outcome}")
+    table.add_column("metric")
+    table.add_column("value", justify="right")
+
+    def fmt(value, suffix=""):
+        return "-" if value is None else f"{value:.2f}{suffix}"
+
+    table.add_row("scenario", report.scenario or "-")
+    table.add_row("end-to-end latency", fmt(report.end_to_end_s, "s"))
+    table.add_row(
+        "verification success rate",
+        fmt(report.success_rate and report.success_rate * 100, "%"),
+    )
+    table.add_row(
+        "first-attempt success rate",
+        fmt(
+            report.first_attempt_success_rate
+            and report.first_attempt_success_rate * 100,
+            "%",
+        ),
+    )
+    table.add_row("retries", str(report.retries))
+    table.add_row("rollbacks", str(report.rollbacks))
+    table.add_row("MTTR", fmt(report.mttr_s, "s"))
+    table.add_row("unresolved failures", str(report.unresolved_failures))
+    table.add_row("agent cost", f"${report.cost_usd:.2f}")
+    console.print(table)
+
+    breakdown = Table(title="per-stage time")
+    breakdown.add_column("stage")
+    breakdown.add_column("total", justify="right")
+    for stage, seconds in sorted(
+        report.stage_durations.items(), key=lambda kv: -kv[1]
+    ):
+        breakdown.add_row(stage, f"{seconds:.1f}s")
+    console.print(breakdown)
+
+
 async def _drive(run_id: str, graph_input, *, auto: bool) -> None:
     """Stream the graph until it finishes or parks at a gate. With auto=True,
     gates are answered 'approve' in a loop until the run finishes."""
@@ -122,13 +184,22 @@ async def _drive(run_id: str, graph_input, *, auto: bool) -> None:
                 payload = await _stream(
                     graph, Command(resume={"action": "approve"}), config
                 )
+
+            snapshot = await graph.aget_state(config)
+            outcome = _outcome(snapshot.values, paused=payload is not None)
+            metrics_module.persist(snapshot.values, outcome)
+            if payload is None:
+                # Terminal: attach the reliability scores to the trace.
+                report = metrics_module.compute(run_id)
+                for name, value in report.scores().items():
+                    tracing.score(name, value)
         tracing.flush()
 
         if payload is not None:
             _print_gate(run_id, payload)
             return
-        snapshot = await graph.aget_state(config)
         _print_final(snapshot.values)
+        console.print(f"[dim]metrics: factory metrics {run_id}[/dim]")
 
 
 async def _stream(graph, graph_input, config):
@@ -169,6 +240,15 @@ def _print_gate(run_id: str, payload: dict) -> None:
         + f"\n  factory approve {run_id} --reject           # reject"
     )
     console.print(Panel(hint, title=f"run {run_id} is paused", border_style="yellow"))
+
+
+def _outcome(values: dict, *, paused: bool) -> str:
+    results = values.get("stage_results") or {}
+    if results.get("safe_stop"):
+        return "safe_stopped"
+    if results.get("summary"):
+        return "finished"
+    return "paused" if paused else "stopped"
 
 
 def _print_final(values: dict) -> None:
