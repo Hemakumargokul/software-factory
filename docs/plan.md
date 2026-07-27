@@ -307,10 +307,10 @@ Day 3: ambiguity detection and clarification, both re-plan triggers with downstr
 - [x] `permissions.py` and `policy_rules.py`: sandbox confinement, profile-defined protected paths, secret scanning (built-in regexes plus optional gitleaks), pom.xml dependency allowlist, per-language forbidden constructs; denials recorded as audit events
 - [x] verification stages (`stages/tests_stage.py`, `stages/acceptance.py`): the profile's build and test commands with hard timeouts and output truncation, plus the acceptance service lifecycle: package, start, health poll, HTTP suite, teardown in a finally block
 - [x] `gates.py`: per-stage entry and exit predicates including the task-dependency entry check for `implement`, plus the high-impact action list driving human approval
-- [ ] `docker-compose.langfuse.yml`: six services, headless init with fixed dev keys, only port 3000 published
+- [x] `docker-compose.langfuse.yml`: six services, headless init with fixed dev keys, only port 3000 published
 - [x] `tracing.py`: no-op guard, callback handler, generation spans per role, tool spans from the PreToolUse hook
-- [ ] `metrics.py`: success rate, retry and rollback frequency, MTTR, end-to-end latency; SQLite persistence, Langfuse scores, CLI report
-- [ ] `tests/factory/`: orchestrator unit tests with the SDK roles mocked, covering gates, policy, metrics, git ops and routing; no auth, Docker or network needed
+- [x] `metrics.py`: success rate, retry and rollback frequency, MTTR, end-to-end latency; SQLite persistence, Langfuse scores, CLI report
+- [x] `tests/factory/`: orchestrator unit tests with the SDK roles mocked, covering gates, policy, metrics, git ops and routing; no auth, Docker or network needed
 - [x] Sequential spine proven end-to-end on a trivial goal
 - [x] Parallel verification superstep with `defer=True` join and reducer-backed fields
 - [x] Bounded retries, model fallback, rollback, safe-stop, and both re-plan triggers: failure-driven and gate-revision-driven, with downstream invalidation

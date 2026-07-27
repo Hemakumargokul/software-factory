@@ -74,7 +74,11 @@ async def implement(state: FactoryState) -> dict:
         payload = dict(event)
         kind = payload.pop("kind", "tool")
         audit_entries.append(audit_event(kind, "implement", **payload))
-        if event.get("decision") == "deny":
+        # Every PreToolUse attempt becomes a trace span; permission denials
+        # get their own WARNING-level span on top.
+        if kind == "tool_attempt":
+            tracing.tool_span(event.get("tool", "?"), event.get("input"))
+        elif event.get("decision") == "deny":
             tracing.tool_span(
                 event.get("tool", "?"), event.get("input"), denied=True
             )
