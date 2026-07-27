@@ -26,7 +26,7 @@ async def summary(state: FactoryState) -> dict:
         metrics=compact(state.get("metric_events") or [], limit=4000),
     )
     with tracing.stage_span("summary"):
-        data = await run_reasoner("summary", prompt)
+        data, cost = await run_reasoner("summary", prompt)
 
     markdown = data.get("summary_markdown", "")
     out_path = RUNS_DIR / state["run_id"] / "summary.md"
@@ -48,6 +48,7 @@ async def summary(state: FactoryState) -> dict:
                 "stage_end",
                 "summary",
                 ok=True,
+                cost_usd=cost,
                 duration_s=round(time.monotonic() - started, 3),
             )
         ],

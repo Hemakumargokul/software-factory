@@ -27,7 +27,7 @@ async def requirements(state: FactoryState) -> dict:
         revision=_revision(state),
     )
     with tracing.stage_span("requirements"):
-        spec = await run_reasoner("requirements", prompt)
+        spec, cost = await run_reasoner("requirements", prompt)
 
     criteria = spec.get("acceptance_criteria", [])
     return {
@@ -45,6 +45,7 @@ async def requirements(state: FactoryState) -> dict:
                 "stage_end",
                 "requirements",
                 ok=True,
+                cost_usd=cost,
                 duration_s=round(time.monotonic() - started, 3),
             )
         ],

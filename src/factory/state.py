@@ -63,6 +63,7 @@ class FactoryState(TypedDict, total=False):
     # Control budgets (in state, not closures, so they survive resume)
     attempts: int
     replan_budget: int
+    run_budget_usd: float          # aggregate agent-spend cap for the run
 
     # Working results: keyed by stage, None means invalidated
     stage_results: Annotated[dict[str, Any], merge_stage_results]
@@ -107,3 +108,15 @@ def audit_event(kind: str, stage: str, **payload: Any) -> dict:
 def metric_event(kind: str, stage: str, **payload: Any) -> dict:
     """A reliability-metric event; metrics.py aggregates these per run."""
     return {"at": _now_iso(), "kind": kind, "stage": stage, "payload": payload}
+
+
+def spent_usd(state: FactoryState) -> float:
+    """Aggregate agent spend so far: every role invocation reports its cost
+    in a metric event, so the sum is the run's total model bill."""
+    return round(
+        sum(
+            event["payload"].get("cost_usd") or 0.0
+            for event in state.get("metric_events") or []
+        ),
+        4,
+    )

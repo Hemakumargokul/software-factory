@@ -36,7 +36,7 @@ async def design(state: FactoryState) -> dict:
         revision=_revision(state),
     )
     with tracing.stage_span("design"):
-        data = await run_reasoner("design", prompt)
+        data, cost = await run_reasoner("design", prompt)
 
     return {
         "design": data,
@@ -59,6 +59,7 @@ async def design(state: FactoryState) -> dict:
                 "stage_end",
                 "design",
                 ok=True,
+                cost_usd=cost,
                 duration_s=round(time.monotonic() - started, 3),
             )
         ],

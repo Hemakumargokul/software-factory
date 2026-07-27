@@ -259,3 +259,46 @@ Exception: Claude Code returned an error result: Reached maximum number of turns
 (40)
 [NOTE] During task with name 'implement' and id 
 'a55edc89-5218-321b-ed0e-eb4013125799'
+● implement
+  T1 implemented: 16 files changed (attempt 2)
+● policy
+● tests
+● review
+● sync
+● acceptance
+● implement
+  T1 attempt 3 aborted: error_max_turns
+● policy
+● tests
+● review
+● sync
+● rollback
+  rolled back T1 to 75f146427fd4
+● decompose
+  3 tasks: T1, T2, T3
+● implement
+  T1 implemented: 12 files changed (attempt 1)
+● policy
+● tests
+● review
+● sync
+● implement
+  T1 implemented: 18 files changed (attempt 2)
+● policy
+● tests
+● review
+● sync
+● rollback
+  rolled back T1 to 75f146427fd4
+● safe_stop
+  run stopped: replan budget exhausted after rollback of T1
+╭────────────────────────────── run safe-stopped ──────────────────────────────╮
+│ replan budget exhausted after rollback of T1                                 │
+│ sandbox preserved: /tmp/factory/af07b819                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+metrics: factory metrics af07b819
+╭────────────────────────────── run safe-stopped ──────────────────────────────╮
+│ replan budget exhausted after rollback of T1                                 │
+│ sandbox preserved: /tmp/factory/af07b819                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+metrics: factory metrics af07b819

@@ -10,11 +10,14 @@ from factory.gates import GateViolation, check_entry
 from factory.graph import (
     MAX_ATTEMPTS,
     build_graph,
+    over_budget,
     route_after_acceptance,
+    route_after_decompose,
     route_after_integrate,
     route_after_rollback,
     route_after_sync,
 )
+from factory.state import metric_event
 from factory.profiles import ProjectProfile
 from factory.stages.decompose import validate_and_order
 
@@ -159,6 +162,62 @@ class TestRouters:
         tasks = [{"id": "T1"}, {"id": "T2"}]
         assert route_after_integrate({"task_idx": 1, "tasks": tasks}) == "implement"
         assert route_after_integrate({"task_idx": 2, "tasks": tasks}) == "release"
+
+
+def _spent_state(spent: float, budget: float | None, **extra) -> dict:
+    events = [metric_event("stage_end", "implement", cost_usd=spent)]
+    state = {"metric_events": events, **extra}
+    if budget is not None:
+        state["run_budget_usd"] = budget
+    return state
+
+
+class TestRunBudget:
+    def test_over_budget_arithmetic(self):
+        assert not over_budget(_spent_state(0.5, 1.0))
+        assert over_budget(_spent_state(1.0, 1.0))       # cap is inclusive
+        assert not over_budget(_spent_state(99.0, None))  # no cap set
+        assert not over_budget(_spent_state(99.0, 0))     # 0 disables
+
+    def test_budget_blocks_new_agent_work_everywhere(self):
+        over = _spent_state(2.0, 1.0, attempts=1, task_idx=0,
+                            tasks=[{"id": "T1"}])
+        over["stage_results"] = {"tests": {"status": "fail"},
+                                 "acceptance": {"status": "fail"}}
+        assert route_after_decompose(over) == "safe_stop"
+        assert route_after_sync(over) == "safe_stop"
+        assert route_after_acceptance(over) == "safe_stop"
+        assert route_after_integrate(over) == "safe_stop"
+        assert route_after_rollback({**over, "replan_budget": 1}) == "safe_stop"
+
+    def test_budget_never_blocks_wrapping_up_verified_work(self):
+        over = _spent_state(2.0, 1.0, attempts=1, task_idx=1,
+                            tasks=[{"id": "T1"}])
+        # Passing verification proceeds to acceptance; passed acceptance
+        # commits; the finished task list releases — no value is discarded.
+        over["stage_results"] = {"tests": {"status": "pass"},
+                                 "implement": {"status": "ok"},
+                                 "acceptance": {"status": "pass"}}
+        assert route_after_sync(over) == "acceptance"
+        assert route_after_acceptance(over) == "commit"
+        assert route_after_integrate(over) == "release"
+
+
+async def test_tiny_budget_safe_stops_before_implementation(
+    spine_env, gate_driver, prompt_log
+):
+    graph = build_graph(checkpointer=InMemorySaver())
+    state = initial_state("budgettest")
+    state["run_budget_usd"] = 0.001  # blown by the first reasoner call
+    final = await gate_driver(graph, state, config_for("budgettest"))
+
+    # Stopped at the first budget checkpoint (requirement gate approval),
+    # before any design/decompose/implement spend
+    stages_run = [stage for stage, _ in prompt_log]
+    assert "design" not in stages_run and "implement" not in stages_run
+    reason = final["stage_results"]["safe_stop"]["reason"]
+    assert "run budget exhausted" in reason
+    assert "spent $" in reason  # actual spend and cap are stated
 
 
 class TestImplementEntryGate:

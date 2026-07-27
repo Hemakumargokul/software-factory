@@ -12,15 +12,17 @@ from factory.claude import JSON_ROLE_SYSTEM_PROMPT, extract_json, reasoner_role
 REPORT_TAIL_LINES = 100
 
 
-async def run_reasoner(stage: str, prompt: str) -> dict[str, Any]:
-    """One reasoner invocation traced as a generation span, JSON out."""
+async def run_reasoner(stage: str, prompt: str) -> tuple[dict[str, Any], float]:
+    """One reasoner invocation traced as a generation span; returns the
+    extracted JSON and the call's cost so every stage can report its spend
+    into the run budget."""
     role = reasoner_role()
     with tracing.generation_span(stage, role.model, prompt) as span:
         result = await claude.run_role(
             role, prompt, system_prompt=JSON_ROLE_SYSTEM_PROMPT
         )
         span.end_with(result)
-    return extract_json(result.text)
+    return extract_json(result.text), result.cost_usd or 0.0
 
 
 def compact(value: Any, limit: int = 4000) -> str:

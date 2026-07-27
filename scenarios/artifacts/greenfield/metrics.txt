@@ -1,0 +1,30 @@
+        run af07b819 — safe_stopped        
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ metric                     ┃      value ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ scenario                   │ greenfield │
+│ end-to-end latency         │   1641.44s │
+│ verification success rate  │     64.71% │
+│ first-attempt success rate │     71.43% │
+│ retries                    │          3 │
+│ rollbacks                  │          2 │
+│ MTTR                       │    180.10s │
+│ unresolved failures        │          3 │
+│ agent cost                 │      $0.96 │
+└────────────────────────────┴────────────┘
+     per-stage time      
+┏━━━━━━━━━━━━━━┳━━━━━━━━┓
+┃ stage        ┃  total ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━┩
+│ implement    │ 703.1s │
+│ acceptance   │ 126.6s │
+│ review       │ 123.4s │
+│ design       │  50.9s │
+│ decompose    │  46.9s │
+│ tests        │  35.9s │
+│ requirements │  31.8s │
+│ intake       │  18.9s │
+│ policy       │   0.8s │
+│ rollback     │   0.2s │
+│ bootstrap    │   0.2s │
+└──────────────┴────────┘

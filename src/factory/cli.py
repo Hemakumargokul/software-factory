@@ -22,9 +22,13 @@ from rich.panel import Panel
 
 from rich.table import Table
 
+from factory import control
 from factory import metrics as metrics_module
 from factory import tracing
 from factory.graph import build_graph
+from factory.state import spent_usd
+
+DEFAULT_RUN_BUDGET_USD = 5.0
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 console = Console()
@@ -54,12 +58,22 @@ def run(
     auto: bool = typer.Option(
         False, "--auto", help="Unattended demo mode: auto-approve every gate"
     ),
+    budget: float = typer.Option(
+        None, "--budget",
+        help="Aggregate agent-spend cap in USD for the whole run "
+        "(default: FACTORY_RUN_BUDGET_USD env or 5.0; 0 disables)",
+    ),
 ):
     """Start a factory run; it pauses at each human gate."""
     profile = profile or os.environ.get("FACTORY_PROFILE", "java-springboot")
+    if budget is None:
+        budget = float(
+            os.environ.get("FACTORY_RUN_BUDGET_USD", DEFAULT_RUN_BUDGET_USD)
+        )
     run_id = uuid.uuid4().hex[:8]
     console.print(
-        Panel(f"[bold]{goal}[/bold]\nrun_id={run_id}  profile={profile}",
+        Panel(f"[bold]{goal}[/bold]\nrun_id={run_id}  profile={profile}  "
+              f"budget=${budget:.2f}",
               title="factory run")
     )
     initial = {
@@ -69,6 +83,7 @@ def run(
         "stage_results": {},
         "attempts": 0,
         "replan_budget": 1,
+        "run_budget_usd": budget,
     }
     asyncio.run(_drive(run_id, initial, auto=auto))
 
@@ -101,6 +116,36 @@ def resume(run_id: str):
     """Continue an interrupted run without answering anything: re-displays
     a pending gate, or re-runs the stage a crash/Ctrl-C cut short."""
     asyncio.run(_drive(run_id, None, auto=False))
+
+
+@app.command()
+def kill(
+    run_id: str,
+    clear: bool = typer.Option(
+        False, "--clear", help="Lift the kill and make the run resumable again"
+    ),
+):
+    """Kill switch: stop a run from any terminal.
+
+    A running run stops at the next stage boundary (checkpointed — nothing
+    verified is lost); a parked run refuses to resume or take gate answers.
+    Reversible: `factory kill <run_id> --clear` then `factory resume`.
+    """
+    if clear:
+        control.clear_kill(run_id)
+        console.print(f"kill flag cleared for {run_id}; "
+                      f"[dim]factory resume {run_id}[/dim] continues it")
+        return
+    control.request_kill(run_id)
+    console.print(
+        Panel(
+            f"[red]kill requested for {run_id}[/red]\n"
+            "a running driver stops at the next stage boundary; "
+            "resume/approve are refused until\n"
+            f"  factory kill {run_id} --clear",
+            title="kill switch",
+        )
+    )
 
 
 @app.command()
@@ -169,32 +214,56 @@ def metrics(run_id: str = typer.Argument(None)):
 
 
 async def _drive(run_id: str, graph_input, *, auto: bool) -> None:
-    """Stream the graph until it finishes or parks at a gate. With auto=True,
-    gates are answered 'approve' in a loop until the run finishes."""
+    """Stream the graph until it finishes, parks at a gate, or is killed.
+    With auto=True, gates are answered 'approve' in a loop until the run
+    finishes."""
+    if control.is_killed(run_id):
+        console.print(
+            f"[red]run {run_id} is killed[/red] — "
+            f"[dim]factory kill {run_id} --clear[/dim] to make it resumable"
+        )
+        raise typer.Exit(1)
+
     CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
     async with AsyncSqliteSaver.from_conn_string(str(CHECKPOINT_DB)) as saver:
         graph = build_graph(checkpointer=saver)
         config = _config(run_id)
 
         with tracing.run_context(run_id, f"factory:{run_id}"):
-            payload = await _stream(graph, graph_input, config)
-            while payload is not None and auto:
+            payload = await _stream(graph, graph_input, config, run_id)
+            while payload is not None and auto and not control.is_killed(run_id):
                 console.print("[yellow]--auto: approving gate "
                               f"'{payload.get('gate')}'[/yellow]")
                 payload = await _stream(
-                    graph, Command(resume={"action": "approve"}), config
+                    graph, Command(resume={"action": "approve"}), config, run_id
                 )
 
+            killed = control.is_killed(run_id)
             snapshot = await graph.aget_state(config)
-            outcome = _outcome(snapshot.values, paused=payload is not None)
+            outcome = (
+                "killed" if killed
+                else _outcome(snapshot.values, paused=payload is not None)
+            )
             metrics_module.persist(snapshot.values, outcome)
-            if payload is None:
+            if payload is None and not killed:
                 # Terminal: attach the reliability scores to the trace.
                 report = metrics_module.compute(run_id)
                 for name, value in report.scores().items():
                     tracing.score(name, value)
         tracing.flush()
 
+        if killed:
+            console.print(
+                Panel(
+                    f"[red]run stopped by kill switch[/red]\n"
+                    f"checkpointed at the last completed stage; "
+                    f"sandbox preserved: {snapshot.values.get('sandbox')}\n"
+                    f"resume with: factory kill {run_id} --clear && "
+                    f"factory resume {run_id}",
+                    title="run killed",
+                )
+            )
+            return
         if payload is not None:
             _print_gate(run_id, payload)
             return
@@ -202,8 +271,13 @@ async def _drive(run_id: str, graph_input, *, auto: bool) -> None:
         console.print(f"[dim]metrics: factory metrics {run_id}[/dim]")
 
 
-async def _stream(graph, graph_input, config):
-    """One streaming leg; returns the interrupt payload if the run parked."""
+async def _stream(graph, graph_input, config, run_id: str):
+    """One streaming leg; returns the interrupt payload if the run parked.
+
+    The kill flag is checked between graph supersteps: breaking out of the
+    stream closes it, the just-finished superstep is already checkpointed,
+    and no further stage is dispatched.
+    """
     payload = None
     async for chunk in graph.astream(graph_input, config, stream_mode="updates"):
         for node, update in chunk.items():
@@ -213,6 +287,9 @@ async def _stream(graph, graph_input, config):
             console.print(f"[cyan]● {node}[/cyan]")
             for decision in (update or {}).get("decisions") or []:
                 console.print(f"  [dim]{decision['decision']}[/dim]")
+        if control.is_killed(run_id):
+            console.print("[red]kill switch: stopping at stage boundary[/red]")
+            break
     return payload
 
 
@@ -267,6 +344,7 @@ def _print_final(values: dict) -> None:
             f"sandbox: {values.get('sandbox')}\n"
             f"head:    {values.get('head_sha')}\n"
             f"ready:   {release_info.get('ready')}\n"
+            f"spend:   ${spent_usd(values):.2f}\n"
             f"summary: {(results.get('summary') or {}).get('path')}",
             title="run finished",
         )
@@ -288,6 +366,7 @@ async def _status(run_id: str) -> None:
             for interrupt in task.interrupts
         ]
         results = snapshot.values.get("stage_results") or {}
+        budget = snapshot.values.get("run_budget_usd")
         lines = [
             f"goal:     {snapshot.values.get('goal')}",
             f"next:     {list(snapshot.next) or '(finished)'}",
@@ -295,8 +374,13 @@ async def _status(run_id: str) -> None:
             f"/{len(snapshot.values.get('tasks') or [])}",
             f"attempts: {snapshot.values.get('attempts', 0)}"
             f"  replan_budget: {snapshot.values.get('replan_budget')}",
+            f"spend:    ${spent_usd(snapshot.values):.2f}"
+            + (f" of ${budget:.2f} budget" if budget else " (no budget cap)"),
             f"stages:   {sorted(k for k, v in results.items() if v)}",
         ]
+        if control.is_killed(run_id):
+            lines.append("[red]KILLED — factory kill "
+                         f"{run_id} --clear to make it resumable[/red]")
         console.print(Panel("\n".join(lines), title=f"run {run_id}"))
         for payload in interrupts:
             _print_gate(run_id, payload)

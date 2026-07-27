@@ -134,6 +134,16 @@ closures), so budgets survive resume:
 - **Re-plan budget**: one rollback-triggered re-decomposition per run; after
   that, safe-stop with the sandbox preserved for a human.
 - **Per-call caps**: max turns and max budget USD on every SDK call.
+- **Run budget**: an aggregate spend cap for the whole run (`--budget`,
+  default $5). Every role invocation reports its cost into state; every
+  router that would dispatch more agent work checks the total first and
+  safe-stops with the spend stated. Verified work is never discarded by a
+  budget stop, and merging it is never blocked.
+- **Kill switch**: `factory kill <run_id>` from any terminal. The driver
+  checks a sentinel flag between graph supersteps, so a running run halts at
+  the next stage boundary with the checkpoint consistent; a parked run
+  refuses to resume until `factory kill --clear`. Reversible: kill parks the
+  run, it does not destroy it.
 - **Fallback model**: one retry on a different model for execution errors.
 
 Re-planning has two triggers: failure (above) and upstream change — a human

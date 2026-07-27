@@ -45,10 +45,19 @@ from factory.stages.review_stage import review_stage
 from factory.stages.rollback import rollback
 from factory.stages.summary import summary
 from factory.stages.tests_stage import tests_stage
-from factory.state import FactoryState, metric_event, record_decision
+from factory.state import FactoryState, metric_event, record_decision, spent_usd
 
 MAX_ATTEMPTS = 3  # initial implementation plus two retries per task
 CLARIFY_THRESHOLD = 0.5  # intake ambiguity_score at/above this asks a human
+
+
+def over_budget(state: FactoryState) -> bool:
+    """Has the run spent its aggregate agent budget? Checked by every router
+    that would dispatch more agent work (implement, re-plan). Verification
+    and wrap-up of already-produced work are never blocked — a budget stop
+    preserves value, it does not discard it."""
+    budget = state.get("run_budget_usd")
+    return bool(budget) and spent_usd(state) >= budget
 
 
 async def sync(state: FactoryState) -> dict:
@@ -85,6 +94,11 @@ async def safe_stop(state: FactoryState) -> dict:
     replan = results.get("replan")
     if rejected:
         reason = f"human rejected at {rejected[0]}"
+    elif over_budget(state):
+        reason = (
+            f"run budget exhausted: spent ${spent_usd(state):.2f} of the "
+            f"${state['run_budget_usd']:.2f} cap"
+        )
     elif replan:
         reason = f"replan budget exhausted after rollback of {replan['task']}"
     else:
@@ -134,16 +148,27 @@ def route_after_gate_requirements(state: FactoryState) -> str:
         "action"
     )
     if action == "approve":
+        if over_budget(state):
+            return "safe_stop"
         return "impact" if state.get("scenario") == "brownfield" else "design"
     if action == "revise":
         return "requirements"
     return "safe_stop"
 
 
-route_after_gate_design = _route_after_gate(
-    "gate_design", on_approve="decompose", on_revise="design",
-    on_reject="safe_stop",
-)
+def route_after_gate_design(state: FactoryState) -> str:
+    action = ((state.get("stage_results") or {}).get("gate_design") or {}).get(
+        "action"
+    )
+    if action == "approve":
+        return "safe_stop" if over_budget(state) else "decompose"
+    if action == "revise":
+        return "design"
+    return "safe_stop"
+
+
+# Merge approval is deliberately NOT budget-checked: integrating work that
+# already passed verification costs nothing and preserves value.
 route_after_gate_merge = _route_after_gate(
     "gate_merge", on_approve="integrate", on_revise="rollback",
     on_reject="rollback",
@@ -166,6 +191,8 @@ def route_after_sync(state: FactoryState) -> str:
     tests_passed = (results.get("tests") or {}).get("status") == "pass"
     if tests_passed and not implement_failed:
         return "acceptance"
+    if over_budget(state):
+        return "safe_stop"
     if state.get("attempts", 0) < MAX_ATTEMPTS:
         return "implement"
     return "rollback"
@@ -179,20 +206,31 @@ def route_after_acceptance(state: FactoryState) -> str:
     )
     if status in ("pass", "skipped"):
         return "commit"
+    if over_budget(state):
+        return "safe_stop"
     if state.get("attempts", 0) < MAX_ATTEMPTS:
         return "implement"
     return "rollback"
 
 
 def route_after_rollback(state: FactoryState) -> str:
-    """Re-plan while the budget lasts (rollback already decremented it)."""
+    """Re-plan while the budgets last (rollback already decremented the
+    re-plan budget; a re-plan is more agent spend, so the run budget also
+    has to allow it)."""
+    if over_budget(state):
+        return "safe_stop"
     return "decompose" if state.get("replan_budget", 0) >= 0 else "safe_stop"
+
+
+def route_after_decompose(state: FactoryState) -> str:
+    """The last check before agent spend begins on a task."""
+    return "safe_stop" if over_budget(state) else "implement"
 
 
 def route_after_integrate(state: FactoryState) -> str:
     """Next task, or wrap up the run."""
     if state["task_idx"] < len(state.get("tasks") or []):
-        return "implement"
+        return "safe_stop" if over_budget(state) else "implement"
     return "release"
 
 
@@ -241,7 +279,9 @@ def build_graph(checkpointer=None):
         route_after_gate_design,
         ["decompose", "design", "safe_stop"],
     )
-    builder.add_edge("decompose", "implement")
+    builder.add_conditional_edges(
+        "decompose", route_after_decompose, ["implement", "safe_stop"]
+    )
 
     # Parallel verification: one superstep out, deferred join back.
     builder.add_edge("implement", "tests")
@@ -252,17 +292,19 @@ def build_graph(checkpointer=None):
     builder.add_edge("review", "sync")
 
     builder.add_conditional_edges(
-        "sync", route_after_sync, ["acceptance", "implement", "rollback"]
+        "sync", route_after_sync,
+        ["acceptance", "implement", "rollback", "safe_stop"],
     )
     builder.add_conditional_edges(
-        "acceptance", route_after_acceptance, ["commit", "implement", "rollback"]
+        "acceptance", route_after_acceptance,
+        ["commit", "implement", "rollback", "safe_stop"],
     )
     builder.add_edge("commit", "gate_merge")
     builder.add_conditional_edges(
         "gate_merge", route_after_gate_merge, ["integrate", "rollback"]
     )
     builder.add_conditional_edges(
-        "integrate", route_after_integrate, ["implement", "release"]
+        "integrate", route_after_integrate, ["implement", "release", "safe_stop"]
     )
     builder.add_conditional_edges(
         "rollback", route_after_rollback, ["decompose", "safe_stop"]

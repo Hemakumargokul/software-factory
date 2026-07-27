@@ -27,7 +27,7 @@ async def intake(state: FactoryState) -> dict:
         goal=state["goal"], clarifications=_clarifications(state)
     )
     with tracing.stage_span("intake", goal=state["goal"]):
-        data = await run_reasoner("intake", prompt)
+        data, cost = await run_reasoner("intake", prompt)
 
     scenario = data.get("scenario", "greenfield")
     score = data.get("ambiguity_score", 0.0)
@@ -47,6 +47,7 @@ async def intake(state: FactoryState) -> dict:
                 "stage_end",
                 "intake",
                 ok=True,
+                cost_usd=cost,
                 duration_s=round(time.monotonic() - started, 3),
             )
         ],

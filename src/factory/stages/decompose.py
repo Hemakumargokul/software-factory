@@ -59,7 +59,7 @@ async def decompose(state: FactoryState) -> dict:
         replan_context=_replan_context(state),
     )
     with tracing.stage_span("decompose"):
-        data = await run_reasoner("decompose", prompt)
+        data, cost = await run_reasoner("decompose", prompt)
 
     tasks = validate_and_order(data.get("tasks", []))
     if not tasks:
@@ -83,6 +83,7 @@ async def decompose(state: FactoryState) -> dict:
                 "stage_end",
                 "decompose",
                 ok=True,
+                cost_usd=cost,
                 duration_s=round(time.monotonic() - started, 3),
             )
         ],

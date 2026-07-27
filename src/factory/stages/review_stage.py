@@ -37,7 +37,7 @@ async def review_stage(state: FactoryState) -> dict:
         diff=diff,
     )
     with tracing.stage_span("review", task=task["id"]):
-        data = await run_reasoner("review", prompt)
+        data, cost = await run_reasoner("review", prompt)
 
     verdict = data.get("verdict", "approve")
     concerns = data.get("concerns", [])
@@ -59,6 +59,7 @@ async def review_stage(state: FactoryState) -> dict:
                 "review",
                 ok=True,
                 verdict=verdict,
+                cost_usd=cost,
                 concerns=len(concerns),
                 attempt=state.get("attempts", 0),
                 duration_s=round(time.monotonic() - started, 3),

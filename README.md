@@ -58,13 +58,30 @@ artifact under review, and exits with a run id. From any process, any time
 later:
 
 ```bash
-factory status  <run_id>                  # where is the run parked?
+factory status  <run_id>                  # where is the run parked? spend so far?
 factory approve <run_id>                  # approve the pending gate
 factory approve <run_id> --revise "..."   # request changes / answer clarifications
 factory approve <run_id> --reject         # reject at this gate
 factory approve <run_id> --auto           # approve this and every later gate
 factory run "..." --auto                  # unattended demo mode
+factory run "..." --budget 5              # cap total agent spend at $5
+factory kill <run_id>                     # kill switch, from any terminal
+factory kill <run_id> --clear             # make a killed run resumable again
 ```
+
+Every run carries an aggregate spend budget (`--budget`, or
+`FACTORY_RUN_BUDGET_USD`, default $5; `0` disables). Every role invocation
+reports its cost into the run's metric events; before dispatching more agent
+work — another implementation attempt, the next task, a re-plan — the graph
+checks the total and safe-stops with the spend stated if the cap is reached.
+Work that already passed verification is never discarded by a budget stop,
+and merging it is never blocked.
+
+`factory kill` stops a run from outside its driving process: a running run
+halts at the next stage boundary (everything up to there is checkpointed),
+and a parked run refuses `approve`/`resume` until the kill is cleared. It is
+reversible by design — kill parks the run, it does not destroy it. For an
+immediate stop of the driving process itself, Ctrl-C is always safe.
 
 A revision at the requirement gate re-runs `requirements` with your edits
 and invalidates the design and task list; a design revision invalidates the

@@ -1,0 +1,3 @@
+Langfuse trace for this run:
+  http://localhost:3000 -> project software-factory -> sessions -> af07b819
+  (login: factory@example.com / factory-dev-password)

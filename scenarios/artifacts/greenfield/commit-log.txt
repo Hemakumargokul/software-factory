@@ -1,0 +1,2 @@
+* 75f1464 (HEAD -> main, factory/t1) factory: scaffold from template java-springboot
+* e18ea7c factory: initial commit

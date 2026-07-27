@@ -1,0 +1,23 @@
+╭──────────────────────────────── run af07b819 ────────────────────────────────╮
+│ goal:     Build a URL shortener web service with EXACTLY this HTTP contract: │
+│ - POST /api/shorten with JSON body {"url": "<absolute http or https URL>"}   │
+│ returns HTTP 201 and JSON {"code": "<short code>", "url": "<original url>"}. │
+│ Shortening the same URL again returns the SAME code (HTTP 200 or 201). Any   │
+│ other scheme (javascript:, data:, ftp:), a malformed URL, or a missing url   │
+│ field returns HTTP 400 with a JSON error body.                               │
+│ - GET /{code} returns an HTTP redirect (301 or 302) with the Location header │
+│ set to the original URL. Unknown codes return HTTP 404.                      │
+│ - GET /api/stats/{code} returns HTTP 200 and JSON {"code": ..., "url": ...,  │
+│ "clicks": ...} where clicks is the number of redirects served for that code. │
+│ Unknown codes return HTTP 404.                                               │
+│ - Rate limiting: POST /api/shorten is capped at 30 requests per second per   │
+│ client IP; requests beyond the cap return HTTP 429. Implement the limiter by │
+│ hand (no new dependencies).                                                  │
+│ Persist URL mappings and click counts in the embedded H2 database. Keep the  │
+│ actuator health endpoint working at /actuator/health.                        │
+│ next:     (finished)                                                         │
+│ task:     0/3                                                                │
+│ attempts: 0  replan_budget: -1                                               │
+│ stages:   ['bootstrap', 'decompose', 'design', 'gate_design',                │
+│ 'gate_requirements', 'intake', 'replan', 'requirements', 'safe_stop']        │
+╰──────────────────────────────────────────────────────────────────────────────╯
