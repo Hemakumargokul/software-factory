@@ -23,9 +23,16 @@ async def design(state: FactoryState) -> dict:
     started = time.monotonic()
     profile = get_profile(state["profile"])
 
+    impact_analysis = state.get("impact")
     prompt = DESIGN_PROMPT.substitute(
         language=profile.stack_description,
         spec=compact(state["spec"]),
+        impact=(
+            f"\nIMPACT ANALYSIS of the existing codebase (design must fit "
+            f"these integration points):\n{compact(impact_analysis)}"
+            if impact_analysis
+            else ""
+        ),
         revision=_revision(state),
     )
     with tracing.stage_span("design"):

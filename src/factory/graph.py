@@ -34,6 +34,7 @@ from factory.stages.human_gates import (
     gate_merge,
     gate_requirements,
 )
+from factory.stages.impact import impact
 from factory.stages.implement import implement
 from factory.stages.intake import intake
 from factory.stages.integrate import integrate
@@ -126,10 +127,19 @@ def _route_after_gate(gate: str, on_approve: str, on_revise: str, on_reject: str
     return router
 
 
-route_after_gate_requirements = _route_after_gate(
-    "gate_requirements", on_approve="design", on_revise="requirements",
-    on_reject="safe_stop",
-)
+def route_after_gate_requirements(state: FactoryState) -> str:
+    """Approved specs route through impact analysis when the request
+    changes an existing system; greenfield goes straight to design."""
+    action = ((state.get("stage_results") or {}).get("gate_requirements") or {}).get(
+        "action"
+    )
+    if action == "approve":
+        return "impact" if state.get("scenario") == "brownfield" else "design"
+    if action == "revise":
+        return "requirements"
+    return "safe_stop"
+
+
 route_after_gate_design = _route_after_gate(
     "gate_design", on_approve="decompose", on_revise="design",
     on_reject="safe_stop",
@@ -189,6 +199,7 @@ def build_graph(checkpointer=None):
     builder.add_node("clarify", clarify)
     builder.add_node("requirements", requirements)
     builder.add_node("gate_requirements", gate_requirements)
+    builder.add_node("impact", impact)
     builder.add_node("design", design)
     builder.add_node("gate_design", gate_design)
     builder.add_node("decompose", decompose)
@@ -216,8 +227,9 @@ def build_graph(checkpointer=None):
     builder.add_conditional_edges(
         "gate_requirements",
         route_after_gate_requirements,
-        ["design", "requirements", "safe_stop"],
+        ["impact", "design", "requirements", "safe_stop"],
     )
+    builder.add_edge("impact", "design")
     builder.add_edge("design", "gate_design")
     builder.add_conditional_edges(
         "gate_design",

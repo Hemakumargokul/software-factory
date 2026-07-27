@@ -99,11 +99,29 @@ Reply with JSON:
 }
 """)
 
+IMPACT_PROMPT = Template("""\
+You are analyzing an EXISTING codebase before a change is designed.
+Read the repository in your working directory (Read/Glob/Grep) and produce
+an impact analysis for this specification. Do not modify anything.
+
+SPECIFICATION:
+$spec
+
+Reply with JSON:
+{
+  "current_state": "what the existing system does, one paragraph",
+  "affected_files": ["path and why it must change", ...],
+  "integration_points": ["existing class/endpoint/table the change must fit into", ...],
+  "regression_risks": [{"risk": "...", "impact": "...", "mitigation": "..."}]
+}
+""")
+
 DESIGN_PROMPT = Template("""\
 Design the system for this specification. Target stack: $language.
 
 SPECIFICATION:
 $spec
+$impact
 $revision
 
 Constraints: single deployable service; embedded database only; every
@@ -319,6 +337,31 @@ def reasoner_role() -> RoleConfig:
         max_turns=3,
         max_budget_usd=1.00,
         no_tools=True,
+    )
+
+
+ANALYST_SYSTEM_PROMPT = (
+    "You are a read-only codebase analyst inside an automated pipeline. "
+    "You may use Read, Glob and Grep to inspect the repository in your "
+    "working directory; never write, edit or execute anything. Finish with "
+    "a single fenced ```json code block matching the schema in the user "
+    "message. No text after the closing fence."
+)
+
+
+def analyst_role() -> RoleConfig:
+    """Brownfield impact analysis: read tools only, JSON out."""
+    return RoleConfig(
+        name="analyst",
+        allowed_tools=("Read", "Glob", "Grep"),
+        disallowed_tools=(
+            "Bash", "Write", "Edit", "MultiEdit", "NotebookEdit",
+            "WebFetch", "WebSearch", "Task",
+        ),
+        model=_env_model("FACTORY_MODEL_REASONER", DEFAULT_REASONER_MODEL),
+        fallback_model=_env_model("FACTORY_MODEL_FALLBACK", DEFAULT_FALLBACK_MODEL),
+        max_turns=15,
+        max_budget_usd=1.50,
     )
 
 

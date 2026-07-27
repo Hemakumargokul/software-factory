@@ -1,6 +1,8 @@
 """M8 tests: human gates pause the graph, revise invalidates downstream
 work, gates have no side effects, and runs survive process restarts."""
 
+from pathlib import Path
+
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
@@ -202,6 +204,53 @@ async def test_run_survives_process_restart(spine_env, tmp_path, gate_driver):
         ]
 
 
+async def test_brownfield_routes_through_impact_into_design(
+    spine_env, gate_driver, canned_replies, prompt_log
+):
+    canned_replies["intake"]["scenario"] = "brownfield"
+
+    graph = build_graph(checkpointer=InMemorySaver())
+    final = await gate_driver(
+        graph, initial_state("brown"), config_for("brown")
+    )
+
+    # Impact ran between the requirement gate and design...
+    stages_run = [stage for stage, _ in prompt_log]
+    assert stages_run.index("impact") < stages_run.index("design")
+    # ...design saw its findings, and its regression risks joined the register
+    design_prompt = next(p for s, p in prompt_log if s == "design")
+    assert "IMPACT ANALYSIS" in design_prompt
+    assert "HelloController" in design_prompt
+    assert any(r.get("risk") == "impact-r1" for r in final["risks"])
+    assert final["stage_results"]["release"]["ready"] is True
+
+
+async def test_greenfield_skips_impact(spine_env, gate_driver, prompt_log):
+    graph = build_graph(checkpointer=InMemorySaver())
+    await gate_driver(graph, initial_state("green"), config_for("green"))
+    assert "impact" not in [stage for stage, _ in prompt_log]
+
+
+async def test_bootstrap_seeds_from_existing_product(
+    spine_env, gate_driver, monkeypatch, tmp_path
+):
+    seed = tmp_path / "existing-product"
+    seed.mkdir()
+    (seed / "Existing.java").write_text("class Existing {}\n")
+    (seed / "target").mkdir()
+    (seed / "target" / "app.jar").write_text("binary")  # must NOT be copied
+    monkeypatch.setenv("FACTORY_SEED_DIR", str(seed))
+
+    graph = build_graph(checkpointer=InMemorySaver())
+    final = await gate_driver(graph, initial_state("seeded"), config_for("seeded"))
+
+    sandbox = Path(final["sandbox"])
+    assert (sandbox / "Existing.java").exists()
+    assert not (sandbox / "target").exists()
+    assert any("seeded from existing product" in d["decision"]
+               for d in final["decisions"])
+
+
 class TestGateRouters:
     def test_route_after_intake(self):
         clear = {"scenario": "greenfield",
@@ -230,6 +279,10 @@ class TestGateRouters:
         assert route(approve) == "design"
         assert route(revise) == "requirements"
         assert route(reject) == "safe_stop"
+
+        brownfield = {"scenario": "brownfield",
+                      "stage_results": {"gate_requirements": {"action": "approve"}}}
+        assert route(brownfield) == "impact"
 
     def test_gate_design_routes(self):
         route = route_after_gate_design

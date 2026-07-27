@@ -53,11 +53,19 @@ CANNED = {
     "review": {"verdict": "approve", "concerns": [],
                "risks": [{"risk": "review-r1", "impact": "low",
                           "mitigation": "none"}]},
+    "impact": {
+        "current_state": "existing greeting service with one endpoint",
+        "affected_files": ["README.md: mentions the endpoint list"],
+        "integration_points": ["HelloController"],
+        "regression_risks": [{"risk": "impact-r1", "impact": "low",
+                              "mitigation": "keep old endpoint"}],
+    },
 }
 
 PROMPT_MARKERS = (
     ("Normalize this engineering request", "intake"),
     ("Write an engineering specification", "requirements"),
+    ("impact analysis for this specification", "impact"),
     ("Design the system", "design"),
     ("Decompose this design", "decompose"),
     ("Review this change as a senior engineer", "review"),
@@ -126,6 +134,7 @@ def spine_env(tmp_path, monkeypatch, canned_replies, prompt_log):
     monkeypatch.setitem(profiles.PROFILES, "noop", noop)
     monkeypatch.setenv("FACTORY_SANDBOX_ROOT", str(tmp_path / "sandboxes"))
     monkeypatch.setenv("FACTORY_ACCEPTANCE_DIR", str(tmp_path / "no-suite"))
+    monkeypatch.delenv("FACTORY_SEED_DIR", raising=False)
     monkeypatch.setattr(
         claude, "run_role", fake_run_role_factory(canned_replies, prompt_log)
     )
