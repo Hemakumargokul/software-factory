@@ -305,8 +305,8 @@ Day 3: ambiguity detection and clarification, both re-plan triggers with downstr
 - [x] `claude.py`: the three SDK roles with per-role model, fallback model, turn and budget caps
 - [x] `profiles.py` and `templates/java-springboot/`: the language profile with build, test, package and run commands, per-language policy patterns, dependency allowlist, and the Maven wrapper skeleton seeded at bootstrap
 - [x] `permissions.py` and `policy_rules.py`: sandbox confinement, profile-defined protected paths, secret scanning (built-in regexes plus optional gitleaks), pom.xml dependency allowlist, per-language forbidden constructs; denials recorded as audit events
-- [ ] `verify.py`: the profile's build and test commands with hard timeouts and output truncation, plus the acceptance service lifecycle: package, start, health poll, HTTP suite, teardown in a finally block
-- [ ] `gates.py`: per-stage entry and exit predicates including the task-dependency entry check for `implement`, plus the high-impact action list driving human approval
+- [x] verification stages (`stages/tests_stage.py`, `stages/acceptance.py`): the profile's build and test commands with hard timeouts and output truncation, plus the acceptance service lifecycle: package, start, health poll, HTTP suite, teardown in a finally block
+- [x] `gates.py`: per-stage entry and exit predicates including the task-dependency entry check for `implement`, plus the high-impact action list driving human approval
 - [ ] `docker-compose.langfuse.yml`: six services, headless init with fixed dev keys, only port 3000 published
 - [x] `tracing.py`: no-op guard, callback handler, generation spans per role, tool spans from the PreToolUse hook
 - [ ] `metrics.py`: success rate, retry and rollback frequency, MTTR, end-to-end latency; SQLite persistence, Langfuse scores, CLI report

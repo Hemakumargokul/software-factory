@@ -15,6 +15,9 @@ TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 @dataclass(frozen=True)
 class ProjectProfile:
     language: str
+    # What the design stage is told about the stack: must describe the
+    # SEEDED SCAFFOLD, or the designer will happily invent a different one.
+    stack_description: str
     scaffold_template: Path
     build_cmd: tuple[str, ...]
     test_cmd: tuple[str, ...]
@@ -36,6 +39,12 @@ class ProjectProfile:
 
 JAVA_SPRINGBOOT = ProjectProfile(
     language="java",
+    stack_description=(
+        "Java 21 with Spring Boot 3 (Maven wrapper already present in the "
+        "repository scaffold: pom.xml with spring-boot-starter-web, actuator "
+        "and H2). Design ON this scaffold — do not propose a different "
+        "framework or build system."
+    ),
     scaffold_template=TEMPLATES_DIR / "java-springboot",
     build_cmd=("./mvnw", "-q", "-B", "compile"),
     test_cmd=("./mvnw", "-q", "-B", "test"),

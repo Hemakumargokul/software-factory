@@ -44,6 +44,7 @@ class FactoryState(TypedDict, total=False):
     # Run identity and the engineering problem
     run_id: str
     goal: str
+    profile: str                   # ProjectProfile name, e.g. "java-springboot"
     scenario: Scenario
 
     # Stage artifacts (also mirrored into stage_results for invalidation)
