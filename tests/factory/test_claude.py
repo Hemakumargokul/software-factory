@@ -83,9 +83,13 @@ class TestRoleConfigs:
         assert role.model == "claude-opus-4-5"
         assert role.fallback_model == "claude-sonnet-4-5"
 
-    def test_model_defaults_to_cli_default_when_env_unset(self, monkeypatch):
+    def test_model_defaults_when_env_unset(self, monkeypatch):
         monkeypatch.delenv("FACTORY_MODEL_REASONER", raising=False)
-        assert reasoner_role().model is None
+        monkeypatch.delenv("FACTORY_MODEL_IMPLEMENTER", raising=False)
+        monkeypatch.delenv("FACTORY_MODEL_FALLBACK", raising=False)
+        assert reasoner_role().model == "sonnet"
+        assert implementer_role().model == "haiku"
+        assert implementer_role().fallback_model == "sonnet"
 
 
 def _result_message(subtype="success", is_error=False, text="ok"):

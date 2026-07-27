@@ -294,9 +294,18 @@ class RoleResult:
     duration_ms: int = 0
 
 
-def _env_model(var: str) -> str | None:
+# Cost-conscious defaults (aliases resolved by the Claude Code CLI): the
+# reasoner needs planning strength (sonnet), the implementer runs many more
+# turns so it gets the cheapest tier (haiku) and escalates to sonnet only
+# when a call dies with an execution error. Env vars override per role.
+DEFAULT_REASONER_MODEL = "sonnet"
+DEFAULT_IMPLEMENTER_MODEL = "haiku"
+DEFAULT_FALLBACK_MODEL = "sonnet"
+
+
+def _env_model(var: str, default: str | None = None) -> str | None:
     value = os.environ.get(var, "").strip()
-    return value or None
+    return value or default
 
 
 def reasoner_role() -> RoleConfig:
@@ -305,8 +314,8 @@ def reasoner_role() -> RoleConfig:
         name="reasoner",
         allowed_tools=(),
         disallowed_tools=(),
-        model=_env_model("FACTORY_MODEL_REASONER"),
-        fallback_model=_env_model("FACTORY_MODEL_FALLBACK"),
+        model=_env_model("FACTORY_MODEL_REASONER", DEFAULT_REASONER_MODEL),
+        fallback_model=_env_model("FACTORY_MODEL_FALLBACK", DEFAULT_FALLBACK_MODEL),
         max_turns=3,
         max_budget_usd=1.00,
         no_tools=True,
@@ -324,8 +333,8 @@ def implementer_role() -> RoleConfig:
         name="implementer",
         allowed_tools=("Read", "Glob", "Grep"),
         disallowed_tools=("Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit"),
-        model=_env_model("FACTORY_MODEL_IMPLEMENTER"),
-        fallback_model=_env_model("FACTORY_MODEL_FALLBACK"),
+        model=_env_model("FACTORY_MODEL_IMPLEMENTER", DEFAULT_IMPLEMENTER_MODEL),
+        fallback_model=_env_model("FACTORY_MODEL_FALLBACK", DEFAULT_FALLBACK_MODEL),
         max_turns=40,
         max_budget_usd=3.00,
     )
