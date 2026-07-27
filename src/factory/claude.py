@@ -378,7 +378,9 @@ def implementer_role() -> RoleConfig:
         disallowed_tools=("Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit"),
         model=_env_model("FACTORY_MODEL_IMPLEMENTER", DEFAULT_IMPLEMENTER_MODEL),
         fallback_model=_env_model("FACTORY_MODEL_FALLBACK", DEFAULT_FALLBACK_MODEL),
-        max_turns=40,
+        # Cheap models spend more turns on the same work; the budget cap is
+        # the real cost bound, turns just catch pathological loops.
+        max_turns=60,
         max_budget_usd=3.00,
     )
 
@@ -449,6 +451,16 @@ async def run_role(
         )
 
 
+def _subtype_from_stream_error(message: str) -> str:
+    """Map a raw SDK stream exception onto the result-subtype vocabulary."""
+    lowered = message.lower()
+    if "maximum number of turns" in lowered:
+        return "error_max_turns"
+    if "budget" in lowered:
+        return "error_max_budget_usd"
+    return "error_during_execution"
+
+
 async def _run_role_once(
     role: RoleConfig,
     prompt: str,
@@ -479,14 +491,26 @@ async def _run_role_once(
     text_parts: list[str] = []
     result: ResultMessage | None = None
 
-    async for message in query(prompt=prompt_arg, options=options):
-        if isinstance(message, ResultMessage):
-            result = message
-        else:
-            for block in getattr(message, "content", []) or []:
-                block_text = getattr(block, "text", None)
-                if block_text:
-                    text_parts.append(block_text)
+    try:
+        async for message in query(prompt=prompt_arg, options=options):
+            if isinstance(message, ResultMessage):
+                result = message
+            else:
+                for block in getattr(message, "content", []) or []:
+                    block_text = getattr(block, "text", None)
+                    if block_text:
+                        text_parts.append(block_text)
+    except Exception as error:
+        # In streaming mode the SDK surfaces some terminal outcomes (max
+        # turns, transport failures) as raw stream exceptions instead of a
+        # ResultMessage. Normalize them to RoleError so stage logic sees one
+        # failure vocabulary — a stream crash must feed the retry loop, not
+        # kill the run.
+        raise RoleError(
+            f"role {role.name!r} stream error: {error}",
+            subtype=_subtype_from_stream_error(str(error)),
+            text="\n".join(text_parts),
+        ) from error
 
     text = "\n".join(text_parts)
 

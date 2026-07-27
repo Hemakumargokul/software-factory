@@ -154,3 +154,45 @@ class TestFallbackRetry:
         import asyncio
         with pytest.raises(RoleError, match="error_during_execution"):
             asyncio.run(run_role(_role(fallback=None), "hi"))
+
+
+class TestStreamErrorNormalization:
+    """In streaming mode the SDK can raise raw exceptions mid-stream (e.g.
+    max turns). They must become RoleErrors with the right subtype — a
+    stream crash feeds the retry loop, it must never kill the run."""
+
+    def _query_raising(self, message):
+        def fake_query(*, prompt, options, transport=None):
+            async def stream():
+                raise Exception(message)
+                yield  # pragma: no cover
+            return stream()
+        return fake_query
+
+    def test_max_turns_stream_error_maps_to_subtype(self, monkeypatch):
+        monkeypatch.setattr(claude, "query", self._query_raising(
+            "Claude Code returned an error result: Reached maximum number "
+            "of turns (60)"
+        ))
+        import asyncio
+        with pytest.raises(RoleError) as excinfo:
+            asyncio.run(run_role(_role(), "hi"))
+        assert excinfo.value.subtype == "error_max_turns"
+
+    def test_unknown_stream_error_falls_back_then_propagates(self, monkeypatch):
+        calls = []
+
+        def fake_query(*, prompt, options, transport=None):
+            async def stream():
+                calls.append(options.model)
+                raise Exception("transport exploded")
+                yield  # pragma: no cover
+            return stream()
+
+        monkeypatch.setattr(claude, "query", fake_query)
+        import asyncio
+        with pytest.raises(RoleError) as excinfo:
+            asyncio.run(run_role(_role(), "hi"))
+        # error_during_execution: eligible for the one-shot model fallback
+        assert excinfo.value.subtype == "error_during_execution"
+        assert calls == ["primary", "backup"]

@@ -30,7 +30,7 @@ def _failure_context(state: FactoryState) -> str:
     results = state.get("stage_results") or {}
     reports = [
         f"[{name}]\n{result.get('report', '')}"
-        for name in ("tests", "acceptance", "policy")
+        for name in ("implement", "tests", "acceptance", "policy")
         if (result := results.get(name))
         and result.get("status") in ("fail", "violation")
     ]
@@ -84,23 +84,67 @@ async def implement(state: FactoryState) -> dict:
             )
 
     role = implementer_role()
+    failure: claude.RoleError | None = None
     with tracing.stage_span("implement", task=task["id"]):
         with tracing.generation_span(
             f"implement:{task['id']}", role.model, prompt
         ) as span:
-            result = await claude.run_role(
-                role,
-                prompt,
-                cwd=sandbox,
-                system_prompt=IMPLEMENTER_SYSTEM_PROMPT,
-                can_use_tool=make_can_use_tool(
-                    sandbox, list(profile.protected_globs), sink
-                ),
-                hooks=make_pretooluse_hook(sink),
-            )
-            span.end_with(result)
+            try:
+                result = await claude.run_role(
+                    role,
+                    prompt,
+                    cwd=sandbox,
+                    system_prompt=IMPLEMENTER_SYSTEM_PROMPT,
+                    can_use_tool=make_can_use_tool(
+                        sandbox, list(profile.protected_globs), sink
+                    ),
+                    hooks=make_pretooluse_hook(sink),
+                )
+                span.end_with(result)
+            except claude.RoleError as error:
+                # A blown cap or stream crash is a failed ATTEMPT, not a dead
+                # run: the partial work stays in the tree for verification to
+                # judge, and the bounded retry/rollback machinery takes over.
+                span.error(str(error))
+                failure = error
 
     files = git_ops.changed_files(sandbox, state["base_sha"])
+
+    if failure is not None:
+        return {
+            "attempts": attempt,
+            "stage_results": {
+                "implement": {
+                    "status": "fail",
+                    "task": task["id"],
+                    "files": files,
+                    "report": f"implementer aborted ({failure.subtype}): "
+                    f"{failure}"[:2000],
+                }
+            },
+            "audit": audit_entries,
+            "decisions": [
+                record_decision(
+                    stage="implement",
+                    decision=f"{task['id']} attempt {attempt} aborted: "
+                    f"{failure.subtype}",
+                    rationale="partial work left in the tree for verification; "
+                    "retry/rollback budgets decide what happens next",
+                )
+            ],
+            "metric_events": [
+                metric_event(
+                    "stage_end",
+                    "implement",
+                    ok=False,
+                    task=task["id"],
+                    attempt=attempt,
+                    error=failure.subtype,
+                    duration_s=round(time.monotonic() - started, 3),
+                )
+            ],
+        }
+
     update = {
         "attempts": attempt,
         "stage_results": {

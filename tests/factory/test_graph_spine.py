@@ -123,6 +123,16 @@ class TestRouters:
                  "attempts": MAX_ATTEMPTS}
         assert route_after_sync(state) == "rollback"
 
+    def test_route_after_sync_implement_abort_never_proceeds(self):
+        # Tests green but the implementer aborted mid-task: the partial
+        # tree building is not the same as the task being done.
+        state = {"stage_results": {"implement": {"status": "fail"},
+                                   "tests": {"status": "pass"},
+                                   "policy": {"status": "pass"}},
+                 "attempts": 1}
+        assert route_after_sync(state) == "implement"
+        assert route_after_sync({**state, "attempts": MAX_ATTEMPTS}) == "rollback"
+
     def test_route_after_sync_policy_violation_skips_retries(self):
         state = {"stage_results": {"tests": {"status": "pass"},
                                    "policy": {"status": "violation"}},

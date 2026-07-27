@@ -155,11 +155,16 @@ def route_after_sync(state: FactoryState) -> str:
 
     Policy violations skip retries entirely — retrying would only teach
     the agent to hide the violation, and the diff is already untrusted.
+    An aborted implement attempt (blown cap, stream crash) never proceeds,
+    even if its partial tree happens to build — the work is incomplete by
+    definition and must be retried or rolled back.
     """
     results = state.get("stage_results") or {}
     if (results.get("policy") or {}).get("status") == "violation":
         return "rollback"
-    if (results.get("tests") or {}).get("status") == "pass":
+    implement_failed = (results.get("implement") or {}).get("status") == "fail"
+    tests_passed = (results.get("tests") or {}).get("status") == "pass"
+    if tests_passed and not implement_failed:
         return "acceptance"
     if state.get("attempts", 0) < MAX_ATTEMPTS:
         return "implement"

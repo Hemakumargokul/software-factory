@@ -204,6 +204,41 @@ async def test_run_survives_process_restart(spine_env, tmp_path, gate_driver):
         ]
 
 
+async def test_implementer_abort_becomes_failed_attempt_and_retries(
+    spine_env, gate_driver, monkeypatch, prompt_log
+):
+    """A RoleError from the implementer (max turns, stream crash) must feed
+    the retry loop, not kill the run: attempt 1 aborts, attempt 2 succeeds,
+    and the retry prompt names the abort."""
+    from factory import claude
+    from factory.claude import RoleError
+
+    real_fake = claude.run_role
+    aborted = {"done": False}
+
+    async def flaky_run_role(role, prompt, **kwargs):
+        if role.name == "implementer" and not aborted["done"]:
+            aborted["done"] = True
+            prompt_log.append(("implement", prompt))
+            raise RoleError("stream error: max turns", subtype="error_max_turns")
+        return await real_fake(role, prompt, **kwargs)
+
+    monkeypatch.setattr(claude, "run_role", flaky_run_role)
+
+    graph = build_graph(checkpointer=InMemorySaver())
+    final = await gate_driver(graph, initial_state("abort"), config_for("abort"))
+
+    # T1 took two attempts; the second prompt carried the abort report
+    implement_prompts = [p for stage, p in prompt_log if stage == "implement"]
+    assert "implementer aborted (error_max_turns)" in implement_prompts[1]
+    abort_events = [e for e in final["metric_events"]
+                    if e["stage"] == "implement" and not e["payload"].get("ok")]
+    assert len(abort_events) == 1
+    # ...and the run still finished
+    assert [t["status"] for t in final["tasks"]] == ["integrated", "integrated"]
+    assert final["stage_results"]["release"]["ready"] is True
+
+
 async def test_brownfield_routes_through_impact_into_design(
     spine_env, gate_driver, canned_replies, prompt_log
 ):
