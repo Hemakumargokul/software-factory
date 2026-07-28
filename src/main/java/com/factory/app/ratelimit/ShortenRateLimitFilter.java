@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
@@ -23,8 +22,15 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * window; the 31st+ gets an immediate HTTP 429 JSON error and the filter
  * chain is halted. Stale per-IP entries are evicted opportunistically so
  * memory doesn't grow unbounded across many distinct client IPs.</p>
+ *
+ * <p><strong>Not wired into the application in this task.</strong> Rate
+ * limiting is out of scope for the current deliverable (project skeleton,
+ * persistence, and core shorten/redirect/stats logic); this class
+ * intentionally omits the {@code @Component} annotation so Spring does not
+ * register it as a servlet filter. A later task is expected to wire it in
+ * (e.g. via {@code @Component} or an explicit {@code FilterRegistrationBean})
+ * once rate limiting is in scope.</p>
  */
-@Component
 public class ShortenRateLimitFilter extends OncePerRequestFilter {
 
     private static final int MAX_REQUESTS_PER_WINDOW = 30;

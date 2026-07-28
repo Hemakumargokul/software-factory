@@ -1,119 +1,176 @@
 package com.factory.app.web;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasLength;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.RequestEntity;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+/**
+ * End-to-end HTTP contract tests for the shorten/redirect/stats endpoints.
+ *
+ * <p>Uses MockMvc exclusively (no real HTTP client such as RestTemplate or
+ * TestRestTemplate) so that 3xx responses from {@code GET /{code}} are
+ * observed directly as status + Location header, never transparently
+ * followed by an HTTP client.</p>
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
 class ShortenControllerWebTest {
 
-    @LocalServerPort
-    private int port;
-
-    // TestRestTemplate does not follow redirects by default (no
-    // HttpClientOption.ENABLE_REDIRECTS configured), so 302 responses from
-    // GET /{code} are observable here rather than silently followed.
     @Autowired
-    private TestRestTemplate restTemplate;
+    private MockMvc mockMvc;
 
-    private String baseUrl() {
-        return "http://localhost:" + port;
-    }
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void shortenReturns201WithCodeAndUrl() {
+    void shortenReturns201WithCodeAndUrl() throws Exception {
         String url = "https://example.com/web-test-" + System.nanoTime();
-        ResponseEntity<ShortenResponse> response = post(url);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().code()).hasSize(7);
-        assertThat(response.getBody().url()).isEqualTo(url);
+        mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code", hasLength(7)))
+                .andExpect(jsonPath("$.url", equalTo(url)));
     }
 
     @Test
-    void shortenTwiceReturns200SameCode() {
+    void shortenTwiceReturns200SameCodeNoDuplicateRow() throws Exception {
         String url = "https://example.com/web-dedup-" + System.nanoTime();
-        ResponseEntity<ShortenResponse> first = post(url);
-        ResponseEntity<ShortenResponse> second = post(url);
 
-        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(second.getBody().code()).isEqualTo(first.getBody().code());
+        MvcResult first = mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String firstCode = objectMapper.readTree(first.getResponse().getContentAsString()).get("code").asText();
+
+        mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", equalTo(firstCode)))
+                .andExpect(jsonPath("$.url", equalTo(url)));
     }
 
     @Test
-    void missingUrlReturns400WithErrorBody() {
-        ResponseEntity<ErrorResponse> response = restTemplate.postForEntity(
-                baseUrl() + "/api/shorten", new java.util.HashMap<String, Object>(), ErrorResponse.class);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(response.getBody().error()).isNotBlank();
+    void missingUrlReturns400WithErrorBody() throws Exception {
+        mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error", not(equalTo(""))));
     }
 
     @Test
-    void invalidSchemeReturns400() {
-        ResponseEntity<ErrorResponse> response = postForError("ftp://example.com/file");
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    void invalidSchemeReturns400() throws Exception {
+        mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", "ftp://example.com/file"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error", not(equalTo(""))));
     }
 
     @Test
-    void redirectFollowsToOriginalUrlAndIncrementsClicks() {
+    void malformedUrlReturns400() throws Exception {
+        mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", "not a url at all"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error", not(equalTo(""))));
+    }
+
+    @Test
+    void redirectReturns302WithLocationAndIncrementsClicks() throws Exception {
         String url = "https://example.com/redirect-test-" + System.nanoTime();
-        String code = post(url).getBody().code();
 
-        RequestEntity<Void> request = RequestEntity.method(HttpMethod.GET, java.net.URI.create(baseUrl() + "/" + code))
-                .build();
-        ResponseEntity<Void> redirectResponse = restTemplate.exchange(request, Void.class);
+        MvcResult created = mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String code = objectMapper.readTree(created.getResponse().getContentAsString()).get("code").asText();
 
-        assertThat(redirectResponse.getStatusCode()).isEqualTo(HttpStatus.FOUND);
-        assertThat(redirectResponse.getHeaders().getLocation()).isEqualTo(java.net.URI.create(url));
+        // Assert on the 302 status + Location header directly; do NOT follow
+        // the redirect with any HTTP client.
+        mockMvc.perform(get("/{code}", code))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", url));
 
-        ResponseEntity<StatsResponse> stats =
-                restTemplate.getForEntity(baseUrl() + "/api/stats/" + code, StatsResponse.class);
-        assertThat(stats.getBody().clicks()).isEqualTo(1L);
+        mockMvc.perform(get("/api/stats/{code}", code))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clicks", equalTo(1)));
     }
 
     @Test
-    void unknownCodeRedirectReturns404() {
-        ResponseEntity<ErrorResponse> response =
-                restTemplate.getForEntity(baseUrl() + "/nosuchcode", ErrorResponse.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    void unknownCodeRedirectReturns404() throws Exception {
+        mockMvc.perform(get("/{code}", "nosuchcode"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error", not(equalTo(""))));
     }
 
     @Test
-    void unknownCodeStatsReturns404() {
-        ResponseEntity<ErrorResponse> response =
-                restTemplate.getForEntity(baseUrl() + "/api/stats/nosuchcode", ErrorResponse.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    void unknownCodeStatsReturns404() throws Exception {
+        mockMvc.perform(get("/api/stats/{code}", "nosuchcode"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error", not(equalTo(""))));
     }
 
-    private ResponseEntity<ShortenResponse> post(String url) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-        RequestEntity<java.util.Map<String, String>> request = RequestEntity.post(
-                        java.net.URI.create(baseUrl() + "/api/shorten"))
-                .headers(headers)
-                .body(java.util.Map.of("url", url));
-        return restTemplate.exchange(request, ShortenResponse.class);
+    @Test
+    void statsReturns200WithCorrectClicksCount() throws Exception {
+        String url = "https://example.com/stats-count-" + System.nanoTime();
+
+        MvcResult created = mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String code = objectMapper.readTree(created.getResponse().getContentAsString()).get("code").asText();
+
+        mockMvc.perform(get("/{code}", code)).andExpect(status().isFound());
+        mockMvc.perform(get("/{code}", code)).andExpect(status().isFound());
+        mockMvc.perform(get("/{code}", code)).andExpect(status().isFound());
+
+        mockMvc.perform(get("/api/stats/{code}", code))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", equalTo(code)))
+                .andExpect(jsonPath("$.url", equalTo(url)))
+                .andExpect(jsonPath("$.clicks", equalTo(3)));
     }
 
-    private ResponseEntity<ErrorResponse> postForError(String url) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-        RequestEntity<java.util.Map<String, String>> request = RequestEntity.post(
-                        java.net.URI.create(baseUrl() + "/api/shorten"))
-                .headers(headers)
-                .body(java.util.Map.of("url", url));
-        return restTemplate.exchange(request, ErrorResponse.class);
+    @Test
+    void statsNeverIncrementsClickCount() throws Exception {
+        String url = "https://example.com/stats-no-increment-web-" + System.nanoTime();
+
+        MvcResult created = mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String code = objectMapper.readTree(created.getResponse().getContentAsString()).get("code").asText();
+
+        mockMvc.perform(get("/api/stats/{code}", code))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clicks", equalTo(0)));
+        mockMvc.perform(get("/api/stats/{code}", code))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clicks", equalTo(0)));
+        mockMvc.perform(get("/api/stats/{code}", code))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clicks", equalTo(0)));
     }
 }
