@@ -30,20 +30,20 @@ the design re-ran with the human's edit folded in and downstream stages
 were invalidated. Both tasks merged; the new `ClickEvent` entity,
 repository and `GET /api/stats/{code}/daily` endpoint are in `product/`.
 
-## ambiguous — run `a02b00b7` (deliberately stopped mid-run by kill switch)
+## ambiguous — run `a02b00b7` (in progress; full run to be completed soon)
 
 "Make it more reliable." Intake scored the request 0.95 ambiguity and
 parked at the clarification gate; the answers (structured JSON errors,
 restart-surviving persistence, DB-aware health endpoint) were folded back
-in and re-intake classified the work brownfield at 0.15. The run then
-demonstrated the governance machinery under real failure: three bounded
-attempts on a task whose integration test had a compile error, rollback to
-the last good merge, a re-plan that was told what had already been
-delivered, an empty-diff attempt rejected by the implement exit gate and
-retried with that context, and T1 of the re-plan (structured error
-handling) verified and merged. The run was then stopped from another
-terminal with `factory kill` — the state above (`status.txt`) is the
-checkpoint it parked at, resumable with
-`factory kill a02b00b7 --clear && factory resume a02b00b7`. It stands as
-the demonstration that a run is a durable, controllable artifact, not a
-process.
+in and re-intake classified the work brownfield at 0.15. The run has
+already demonstrated the governance machinery under real failure: three
+bounded attempts on a task whose integration test had a compile error,
+rollback to the last good merge, a re-plan that was told what had already
+been delivered, an empty-diff attempt rejected by the implement exit gate
+and retried with that context, and T1 of the re-plan (structured error
+handling) verified and merged. The run is currently parked mid-flight via
+the kill switch — `status.txt` shows the checkpoint — and will be resumed
+and completed soon with
+`factory kill a02b00b7 --clear && factory resume a02b00b7`. Its captured
+state meanwhile demonstrates that a run is a durable, controllable
+artifact, not a process.
