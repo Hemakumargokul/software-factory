@@ -793,3 +793,15 @@ JsonExtractionError: no parseable JSON object in role reply
 JsonExtractionError: no parseable JSON object in role reply
 [NOTE] During task with name 'summary' and id 
 '52c88a8a-1c72-3dea-8b33-b27f966bae8c'
+● summary
+  engineering summary written to 
+/Users/hgokulakannan/sites/software-factory/runs/498f963c/summary.md
+╭──────────────────────────────── run finished ────────────────────────────────╮
+│ sandbox: /tmp/factory/498f963c                                               │
+│ head:    133ac7092231af63fc17b2eed9992d84cc646273                            │
+│ ready:   True                                                                │
+│ spend:   $6.40                                                               │
+│ summary:                                                                     │
+│ /Users/hgokulakannan/sites/software-factory/runs/498f963c/summary.md         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+metrics: factory metrics 498f963c
