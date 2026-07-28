@@ -1,0 +1,34 @@
+          run 2bfb10e8 — finished          
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ metric                     ┃      value ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ scenario                   │ brownfield │
+│ end-to-end latency         │    764.50s │
+│ verification success rate  │     84.62% │
+│ first-attempt success rate │     83.33% │
+│ retries                    │          2 │
+│ rollbacks                  │          0 │
+│ MTTR                       │    241.42s │
+│ unresolved failures        │          0 │
+│ agent cost                 │      $2.79 │
+└────────────────────────────┴────────────┘
+     per-stage time      
+┏━━━━━━━━━━━━━━┳━━━━━━━━┓
+┃ stage        ┃  total ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━┩
+│ implement    │ 389.6s │
+│ design       │ 102.1s │
+│ review       │  90.4s │
+│ impact       │  73.0s │
+│ tests        │  44.3s │
+│ requirements │  34.4s │
+│ summary      │  30.7s │
+│ decompose    │  17.0s │
+│ intake       │  12.6s │
+│ acceptance   │   6.5s │
+│ policy       │   1.1s │
+│ bootstrap    │   0.4s │
+│ integrate    │   0.2s │
+│ commit       │   0.2s │
+│ release      │   0.0s │
+└──────────────┴────────┘

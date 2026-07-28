@@ -13,18 +13,50 @@ from factory.agent.prompts import JSON_ROLE_SYSTEM_PROMPT
 
 REPORT_TAIL_LINES = 100
 
+JSON_RETRY_NUDGE = (
+    "\n\nIMPORTANT: your previous reply could not be parsed as JSON. "
+    "Reply again with ONLY the JSON object requested above — no prose "
+    "before or after it."
+)
+
+
+async def call_json_role(
+    stage: str,
+    role,
+    prompt: str,
+    *,
+    system_prompt: str,
+    cwd: Path | None = None,
+) -> tuple[dict[str, Any], float]:
+    """Invoke a role that must answer in JSON, traced as a generation span.
+
+    A reply without parseable JSON is retried ONCE with an explicit nudge
+    (models occasionally answer with the document instead of the wrapper);
+    the second failure propagates. Returns the JSON and the total cost of
+    all calls so every stage reports its true spend into the run budget."""
+    total_cost = 0.0
+    attempt_prompt = prompt
+    for attempt in (1, 2):
+        with tracing.generation_span(stage, role.model, attempt_prompt) as span:
+            result = await claude.run_role(
+                role, attempt_prompt, cwd=cwd, system_prompt=system_prompt
+            )
+            span.end_with(result)
+        total_cost += result.cost_usd or 0.0
+        try:
+            return extract_json(result.text), total_cost
+        except claude.JsonExtractionError:
+            if attempt == 2:
+                raise
+            attempt_prompt = prompt + JSON_RETRY_NUDGE
+    raise AssertionError("unreachable")
+
 
 async def run_reasoner(stage: str, prompt: str) -> tuple[dict[str, Any], float]:
-    """One reasoner invocation traced as a generation span; returns the
-    extracted JSON and the call's cost so every stage can report its spend
-    into the run budget."""
-    role = reasoner_role()
-    with tracing.generation_span(stage, role.model, prompt) as span:
-        result = await claude.run_role(
-            role, prompt, system_prompt=JSON_ROLE_SYSTEM_PROMPT
-        )
-        span.end_with(result)
-    return extract_json(result.text), result.cost_usd or 0.0
+    """One reasoner invocation; returns the extracted JSON and its cost."""
+    return await call_json_role(
+        stage, reasoner_role(), prompt, system_prompt=JSON_ROLE_SYSTEM_PROMPT
+    )
 
 
 def compact(value: Any, limit: int = 4000) -> str:

@@ -1,0 +1,10 @@
+*   d9699de (HEAD -> main) factory: integrate T2
+|\  
+| * f7547c6 (factory/t2) factory(T2): Implement GET /api/stats/{code}/daily endpoint with DTO, service method, and controller wiring
+|/  
+*   6c6436b factory: integrate T1
+|\  
+| * 4e41cbf (factory/t1) factory(T1): Persist per-click timestamps via new ClickEvent entity and repository
+|/  
+* 8d9ce5d factory: seed from /tmp/factory/498f963c
+* 268be44 factory: initial commit

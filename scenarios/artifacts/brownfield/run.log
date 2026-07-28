@@ -1,0 +1,1365 @@
+╭──────────────────────────────── factory run ─────────────────────────────────╮
+│ In the existing URL shortener codebase, add per-day click analytics: a new   │
+│ endpoint GET /api/stats/{code}/daily returning HTTP 200 and a JSON array     │
+│ [{"date": "YYYY-MM-DD", "clicks": N}, ...] of redirect counts per calendar   │
+│ day (UTC), most recent first; unknown codes return HTTP 404. Do NOT change   │
+│ any existing endpoint, response shape, validation rule or the rate limiter — │
+│ the existing behavior is contractual.                                        │
+│ run_id=2bfb10e8  profile=java-springboot  budget=$10.00                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+● bootstrap
+  sandbox seeded from existing product at /tmp/factory/498f963c
+● intake
+  classified as brownfield, ambiguity 0.35
+● requirements
+  spec written with 12 acceptance criteria
+╭────────────────────────── HUMAN GATE: requirements ──────────────────────────╮
+│ Approve the specification?                                                   │
+│                                                                              │
+│ spec: {                                                                      │
+│   "summary": "This specification defines the addition of a new read-only     │
+│ analytics endpoint, GET /api/stats/{code}/daily, to the existing URL         │
+│ shortener service. The endpoint aggregates existing (or newly introduced, if │
+│ not already present) redirect/click event data by calendar day in UTC and    │
+│ returns a JSON array of {date, clicks} objects ordered most-recent-first,    │
+│ returning HTTP 200 for known codes and HTTP 404 for unknown ones. The        │
+│ feature is strictly additive: it must not alter any existing endpoint's      │
+│ behavior, response shape, validation logic, or the rate limiter's            │
+│ configuration or enforcement, and it must integrate with the existing        │
+│ authentication/authorization scheme used by comparable read endpoints in the │
+│ codebase.",                                                                  │
+│   "functional_requirements": [                                               │
+│     "FR1: The service SHALL expose a new endpoint GET                        │
+│ /api/stats/{code}/daily that accepts a short code path parameter.",          │
+│     "FR2: If {code} corresponds to a short code that exists (was previously  │
+│ created via the shortening endpoint), the service SHALL respond with HTTP    │
+│ 200 and a JSON array body.",                                                 │
+│     "FR3: If {code} does not correspond to any existing short code, the      │
+│ service SHALL respond with HTTP 404 and SHALL NOT include a daily-stats      │
+│ array in the response body.",                                                │
+│     "FR4: Each element of the returned array SHALL be a JSON object with     │
+│ exactly two fields: 'date' (string, format YYYY-MM-DD) and 'clicks'          │
+│ (non-negative integer).",                                                    │
+│     "FR5: The 'date' value in each object SHALL represent a calendar day     │
+│ boundary computed in UTC, such that a click recorded at any UTC timestamp    │
+│ within [00:00:00, 23:59:59] of that date is attributed to that date.",       │
+│     "FR6: The array SHALL be ordered by date descending (most recent date    │
+│ first, oldest date last), with no two objects sharing the same date value.", │
+│     "FR7: Only calendar days that have at least one recorded click for the   │
+│ given code SHALL be included in the array; days with zero recorded clicks    │
+│ SHALL be omitted (no {clicks: 0} entries).",                                 │
+│     "FR8: A 'click' SHALL be defined as a successful resolution/redirect     │
+│ event for the short code (i.e., a request that results in the service        │
+│ issuing a redirect to the original URL), counted once per such event with no │
+│ deduplication of repeat requests, retries, or bot traffic.",                 │
+│     "FR9: If a code exists but has zero recorded clicks in its entire        │
+│ history, the endpoint SHALL return HTTP 200 with an empty JSON array ([]),   │
+│ not a 404.",                                                                 │
+│     "FR10: The response array SHALL cover the entire click history of the    │
+│ code from creation to the time of the request, with no pagination,           │
+│ truncation, or date-range filtering applied in this version.",               │
+│     "FR11: The endpoint SHALL apply the same authentication/authorization    │
+│ requirements (if any) as are currently enforced on the existing stats/read   │
+│ endpoints for the same code resource; if existing read endpoints are         │
+│ unauthenticated/public, this endpoint SHALL likewise be                      │
+│ unauthenticated/public.",                                                    │
+│     "FR12: The endpoint SHALL be subject to the existing rate limiter using  │
+│ the same rules, keys, and limits already applied to other read/stats         │
+│ endpoints, without any modification to the rate limiter's implementation or  │
+│ configuration.",                                                             │
+│     "FR13: If the underlying data model does not currently persist per-click │
+│ timestamps, the service SHALL be extended to record a timestamp for each     │
+│ redirect event so that daily aggregation is possible, without altering the   │
+│ existing redirect endpoint's request/response contract or status codes.",    │
+│     "FR14: All existing endpoints (creation, redirect, existing stats        │
+│ endpoints, etc.) SHALL continue to return identical status codes, response   │
+│ bodies, and headers for the same inputs as before this change, with no       │
+│ regression in validation rules or error handling.",                          │
+│     "FR15: The 'code' path parameter SHALL be validated using the same       │
+│ syntactic rules (character set, length) already used to validate short codes │
+│ elsewhere in the service; a syntactically invalid code SHALL return 404      │
+│ (treated as unknown/not found), consistent with how other endpoints handle   │
+│ malformed codes, unless the existing codebase already returns a distinct     │
+│ status (e.g., 400) for malformed codes on comparable endpoints, in which     │
+│ case that existing convention SHALL be matched."                             │
+│   ],                                                                         │
+│   "non_functional_requirements": [                                           │
+│     "NFR1: The endpoint's response time for codes with up to 10,000 recorded │
+│ click events SHALL be within the same latency budget (e.g., p95) as the      │
+│ existing stats endpoint(s) in the codebase, under equivalent load.",         │
+│     "NFR2: The change SHALL introduce no measurable regression (>5% latency  │
+│ increase or any status/body change) to any existing endpoint, verified via a │
+│ full existing test suite/regression pass.",                                  │
+│     "NFR3: The new endpoint SHALL be implemented as read-only and SHALL NOT  │
+│ mutate any click/event/URL data as a side effect of being called.",          │
+│     "NFR4: Aggregation logic SHALL be deterministic: repeated calls to the   │
+│ endpoint with no new clicks recorded in between SHALL return byte-identical  │
+│ JSON arrays.",                                                               │
+│     "NFR5: The endpoint SHALL return well-formed JSON with Content-Type:     │
+│ application/json on all 200 and 404 responses.",                             │
+│     "NFR6: Any new data storage (e.g., click timestamp persistence)          │
+│ introduced to support this feature SHALL not require a breaking schema       │
+│ migration that alters or removes existing fields used by current             │
+│ endpoints.",                                                                 │
+│     "NFR7: The rate limiter's existing unit/integration tests SHALL pass     │
+│ unmodified after this change, demonstrating its behavior is untouched."      │
+│   ],                                                                         │
+│   "acceptance_criteria": [                                                   │
+│     "AC1: Given a short code that was created and has recorded clicks on     │
+│ 2026-07-25 (3 clicks) and 2026-07-27 (1 click) in UTC, when GET              │
+│ /api/stats/{code}/daily is called, then the response is HTTP 200 with body   │
+│ [{\"date\":\"2026-07-27\",\"clicks\":1},{\"date\":\"2026-07-25\",\"clicks\": │
+│ 3}] (2026-07-26 omitted, most-recent-first order).",                         │
+│     "AC2: Given a short code that has never been created, when GET           │
+│ /api/stats/{nonexistent-code}/daily is called, then the response is HTTP     │
+│ 404.",                                                                       │
+│     "AC3: Given a short code that exists but has zero recorded clicks, when  │
+│ GET /api/stats/{code}/daily is called, then the response is HTTP 200 with    │
+│ body [] (empty array, not 404).",                                            │
+│     "AC4: Given a click recorded at 2026-07-27T23:59:59Z, when GET           │
+│ /api/stats/{code}/daily is called, then that click is attributed to date     │
+│ \"2026-07-27\" and not to \"2026-07-28\".",                                  │
+│     "AC5: Given a click recorded at 2026-07-27T00:00:00Z, when GET           │
+│ /api/stats/{code}/daily is called, then that click is attributed to date     │
+│ \"2026-07-27\".",                                                            │
+│     "AC6: Given a short code with clicks recorded across more than 2         │
+│ distinct calendar days, when GET /api/stats/{code}/daily is called, then the │
+│ returned array's 'date' values are strictly decreasing (each subsequent      │
+│ element's date is earlier than the previous element's date).",               │
+│     "AC7: Given the existing test suite for POST /api/shorten (or equivalent │
+│ creation endpoint), GET /{code} (redirect), and any pre-existing GET         │
+│ /api/stats/{code} endpoint, when that test suite is re-run after this change │
+│ is deployed, then all existing tests pass with identical status codes and    │
+│ response bodies as before the change.",                                      │
+│     "AC8: Given the existing rate limiter configuration and its current test │
+│ suite, when that suite is re-run after this change, then all rate-limiter    │
+│ tests pass unmodified, and manually exceeding the configured request         │
+│ threshold against GET /api/stats/{code}/daily produces the same rate-limit   │
+│ response (status code and body) as exceeding it against an existing read     │
+│ endpoint.",                                                                  │
+│     "AC9: Given a code with 3 clicks all on the same UTC calendar day, when  │
+│ GET /api/stats/{code}/daily is called, then the response contains exactly    │
+│ one array element for that date with clicks equal to 3.",                    │
+│     "AC10: Given repeated GET /api/stats/{code}/daily requests with no new   │
+│ clicks recorded in between, when compared, then both responses are           │
+│ byte-identical JSON.",                                                       │
+│     "AC11: Given any existing authentication/authorization requirement on    │
+│ comparable read endpoints (e.g., an API key header), when GET                │
+│ /api/stats/{code}/daily is called without that credential, then it returns   │
+│ the same authentication error response (status and body) as the comparable   │
+│ existing endpoint would under identical conditions; if no auth is required   │
+│ elsewhere, this endpoint requires none either.",                             │
+│     "AC12: Given a request to GET /api/stats/{code}/daily where {code} is    │
+│ syntactically invalid per existing code-format rules, when the request is    │
+│ made, then the response status matches whatever the existing codebase        │
+│ returns for syntactically invalid codes on comparable endpoints (404 or 400, │
+│ consistently applied)."                                                      │
+│   ],                                                                         │
+│   "out_of_scope": [                                                          │
+│     "Date-range filtering, pagination, or query parameters (e.g.,            │
+│ ?from=&to=) for limiting the returned array.",                               │
+│     "Hourly, weekly, monthly, or other non-daily aggregation                 │
+│ granularities.",                                                             │
+│     "Deduplication of clicks by IP, user agent, session, or                  │
+│ bot-detection/filtering logic.",                                             │
+│     "Timezone parameters or non-UTC day boundaries; only UTC calendar days   │
+│ are supported.",                                                             │
+│     "Real-time/streaming analytics or webhooks for click events.",           │
+│     "Changes to the rate limiter's limits, keys, or algorithm.",             │
+│     "Changes to any existing endpoint's request/response contract, status    │
+│ codes, or validation rules.",                                                │
+│     "New authentication/authorization mechanisms not already present in the  │
+│ codebase.",                                                                  │
+│     "Data retention policies, archival, or purging of historical click       │
+│ data.",                                                                      │
+│     "Performance optimization for codes with extremely high click volume     │
+│ (e.g., millions of events) beyond matching existing stats-endpoint           │
+│ performance characteristics.",                                               │
+│     "Backfilling historical daily aggregates for clicks recorded before this │
+│ feature's deployment if such raw event data does not already exist in the    │
+│ system."                                                                     │
+│   ]                                                                          │
+│ }                                                                            │
+│ open_ambiguities: [                                                          │
+│   "Does the existing system already store per-click event timestamps, or     │
+│ does click tracking need to be introduced/expanded to support daily          │
+│ aggregation?",                                                               │
+│   "Should days with zero clicks within the code's active date range be       │
+│ included as {clicks: 0} entries, or omitted entirely?",                      │
+│   "Is there a bounded date range (e.g., last 30/90 days) or pagination for   │
+│ the response, or is it truly unbounded regardless of history length?",       │
+│   "Does this new endpoint need to respect the existing rate limiter (as an   │
+│ unmodified consumer of it), or is it explicitly excluded from rate           │
+│ limiting?",                                                                  │
+│   "What authentication/authorization is required for this endpoint \u2014    │
+│ public, same as redirect endpoint, or same as other stats/admin endpoints?", │
+│   "What is the exact definition of a 'click' \u2014 every raw redirect hit   │
+│ including bots/retries, or deduplicated/unique visits?",                     │
+│   "Should an expired or soft-deleted (but previously existing) short code    │
+│ return 404, or should it return its historical stats?"                       │
+│ ]                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────── run 2bfb10e8 is paused ───────────────────────────╮
+│   factory approve 2bfb10e8                    # approve                      │
+│   factory approve 2bfb10e8 --revise "..."     # request changes              │
+│   factory approve 2bfb10e8 --reject           # reject                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+● gate_requirements
+  human: approve
+● impact
+  impact analysis: 12 files affected, 7 regression risks
+● design
+  The design extends the existing layered Spring Boot MVC app (Controller -> 
+Service -> Repository -> H2) without introducing new frameworks. A new JPA 
+entity ClickEvent (id, code, clicked_at UTC timestamp) is added to persist one 
+row per successful redirect. UrlShortenerService.resolveAndRecordClick 
+╭───────────────────────────── HUMAN GATE: design ─────────────────────────────╮
+│ Approve architecture, API contract and data model?                           │
+│                                                                              │
+│ design: {                                                                    │
+│   "architecture": "The design extends the existing layered Spring Boot MVC   │
+│ app (Controller -> Service -> Repository -> H2) without introducing new      │
+│ frameworks. A new JPA entity ClickEvent (id, code, clicked_at UTC timestamp) │
+│ is added to persist one row per successful redirect.                         │
+│ UrlShortenerService.resolveAndRecordClick is extended to, in addition to its │
+│ existing incrementClickCount()/save(mapping) behavior (left byte-for-byte    │
+│ unchanged in return type/contract), also persist a new ClickEvent row via a  │
+│ new ClickEventRepository inside the same @Transactional method \u2014 this   │
+│ keeps redirect semantics (302 + Location) untouched while making per-click   │
+│ timestamps durable. A new read-only method, dailyStats(code), first verifies │
+│ the code exists via the existing                                             │
+│ UrlMappingRepository.findByCode(...).orElseThrow(CodeNotFoundException) path │
+│ (reusing the exact same not-found semantics as existing StatsController, so  │
+│ 404 behavior is identical/shared), then queries ClickEventRepository with a  │
+│ JPQL aggregation grouping by DATE(clicked_at) (interpreted in UTC, since     │
+│ clicked_at is stored as an Instant/UTC timestamp and H2's DATE()/CAST        │
+│ truncation on a UTC-stored value yields the UTC calendar day) ordered        │
+│ descending, mapping results into an ordered list of DailyClickCount(date,    │
+│ clicks) records with zero-click days naturally absent because the query is   │
+│ driven by existing rows only (no calendar generation). A new handler method  │
+│ is added onto the existing StatsController (GET /api/stats/{code}/daily),    │
+│ reusing the same GlobalExceptionHandler CodeNotFoundException->404 mapping   │
+│ already used by GET /api/stats/{code}, guaranteeing identical error shape.   │
+│ The endpoint is deliberately not registered in ShortenRateLimitFilter's      │
+│ shouldNotFilter/isRateLimited logic (which only matches POST /api/shorten),  │
+│ so it passes through the filter chain untouched, exactly like the existing   │
+│ GET endpoints \u2014 no filter code changes are required. Since there is no  │
+│ security framework in the codebase, the new endpoint remains public,         │
+│ consistent with FR11. Schema evolution for the new ClickEvent table is       │
+│ handled automatically by the existing ddl-auto=update setting against        │
+│ embedded H2, requiring no migration tooling change.",                        │
+│   "components": [                                                            │
+│     {                                                                        │
+│       "name": "ClickEvent (new JPA entity)",                                 │
+│       "responsibility": "Persist one immutable row per successful redirect:  │
+│ id, code (indexed, FK-like string reference to UrlMapping.code), clickedAt   │
+│ (Instant, stored/interpreted as UTC). Provides the raw event log needed for  │
+│ daily aggregation."                                                          │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "ClickEventRepository (new Spring Data JPA repository)",       │
+│       "responsibility": "Persist ClickEvent rows; expose a JPQL aggregation  │
+│ query grouping by UTC calendar day for a given code, returning (date, count) │
+│ pairs ordered descending, plus an existsByCode-style check reused indirectly │
+│ via UrlMapping lookup."                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "UrlShortenerService.resolveAndRecordClick (extended,          │
+│ existing)",                                                                  │
+│       "responsibility": "Unchanged external contract: resolve code,          │
+│ increment click_count, save mapping, return original URL (or throw           │
+│ CodeNotFoundException) for the redirect. Internally also persists a new      │
+│ ClickEvent(code, now()) in the same transaction so redirect and              │
+│ click-logging are atomic."                                                   │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "UrlShortenerService.dailyStats (new method)",                 │
+│       "responsibility": "Verify code existence via existing                  │
+│ UrlMappingRepository lookup (throwing the same CodeNotFoundException used    │
+│ elsewhere on absence/malformed code), then delegate to                       │
+│ ClickEventRepository's aggregation query, mapping rows into an ordered       │
+│ List<DailyClickCount>. Returns empty list for existing codes with zero click │
+│ events."                                                                     │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "DailyClickCount (new DTO/record)",                            │
+│       "responsibility": "Immutable response element with exactly two fields, │
+│ date (ISO-8601 YYYY-MM-DD string) and clicks (non-negative long/int),        │
+│ serialized by Jackson as-is to satisfy FR4's exact shape."                   │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "StatsController (extended, existing)",                        │
+│       "responsibility": "Add GET /api/stats/{code}/daily handler alongside   │
+│ the existing GET /api/stats/{code} handler, delegating to                    │
+│ UrlShortenerService.dailyStats and returning 200 + JSON array (or letting    │
+│ CodeNotFoundException propagate to GlobalExceptionHandler for 404). No       │
+│ changes to the existing handler's method or mapping."                        │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "GlobalExceptionHandler (unchanged, reused)",                  │
+│       "responsibility": "Continues to translate CodeNotFoundException -> 404 │
+│ {\"error\": ...} uniformly for both the existing stats endpoint and the new  │
+│ daily endpoint, guaranteeing consistent error shape without new code."       │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "ShortenRateLimitFilter (unchanged, verified only)",           │
+│       "responsibility": "Continues to match only POST /api/shorten via       │
+│ shouldNotFilter/isRateLimited; the new GET endpoint is confirmed (via test)  │
+│ to bypass the filter exactly like all other GET endpoints, with zero code    │
+│ changes."                                                                    │
+│     }                                                                        │
+│   ],                                                                         │
+│   "api_contract": [                                                          │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/api/stats/{code}/daily",                                     │
+│       "request": "Path variable code: string (same charset/length as         │
+│ existing code validation); no body, no query params",                        │
+│       "response": "200: JSON array of {date: 'YYYY-MM-DD', clicks:           │
+│ non-negative integer}, ordered by date descending, omitting zero-click days, │
+│ empty array if code exists with no clicks. 404: {\"error\": \"...\"}         │
+│ identical shape to existing GET /api/stats/{code} not-found response, used   │
+│ for both unknown and syntactically invalid codes.",                          │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         404                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/api/stats/{code}",                                           │
+│       "request": "unchanged (existing endpoint, no modification)",           │
+│       "response": "unchanged: {code, url, clicks}",                          │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         404                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/{code}",                                                     │
+│       "request": "unchanged (existing redirect endpoint)",                   │
+│       "response": "unchanged: 302 + Location header; internally now also     │
+│ logs a ClickEvent row, but contract/status codes untouched",                 │
+│       "status_codes": [                                                      │
+│         302,                                                                 │
+│         404                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "POST",                                                      │
+│       "path": "/api/shorten",                                                │
+│       "request": "unchanged",                                                │
+│       "response": "unchanged",                                               │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         201,                                                                 │
+│         400                                                                  │
+│       ]                                                                      │
+│     }                                                                        │
+│   ],                                                                         │
+│   "data_model": [                                                            │
+│     {                                                                        │
+│       "entity": "UrlMapping (unchanged)",                                    │
+│       "fields": [                                                            │
+│         "id: Long",                                                          │
+│         "code: String",                                                      │
+│         "originalUrl: String",                                               │
+│         "clickCount: long"                                                   │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "entity": "ClickEvent (new)",                                          │
+│       "fields": [                                                            │
+│         "id: Long (generated PK)",                                           │
+│         "code: String (indexed, references UrlMapping.code)",                │
+│         "clickedAt: Instant (UTC timestamp of the redirect event)"           │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "entity": "DailyClickCount (new, non-persistent DTO/record for API     │
+│ response only)",                                                             │
+│       "fields": [                                                            │
+│         "date: String (YYYY-MM-DD, UTC calendar day)",                       │
+│         "clicks: long (count of ClickEvent rows for that code/day,           │
+│ non-negative)"                                                               │
+│       ]                                                                      │
+│     }                                                                        │
+│   ],                                                                         │
+│   "alternatives_considered": [                                               │
+│     "Store only a JSON/array blob of timestamps on UrlMapping instead of a   │
+│ separate ClickEvent table \u2014 rejected: harder to query/aggregate         │
+│ efficiently with JPQL/SQL, poor scalability, and awkward concurrent-append   │
+│ semantics under JPA optimistic locking.",                                    │
+│     "Compute daily stats by parsing/deriving from clickCount alone without   │
+│ persisting timestamps \u2014 rejected: violates FR13/FR5, since aggregate    │
+│ counters cannot be attributed to calendar days retroactively.",              │
+│     "Introduce a dedicated migration tool (Flyway/Liquibase) to manage the   │
+│ new ClickEvent table \u2014 rejected: adds a new dependency requiring        │
+│ governance approval; ddl-auto=update on embedded H2 already satisfies schema │
+│ evolution needs for this scope.",                                            │
+│     "Add the daily endpoint as a new separate controller                     │
+│ (DailyStatsController) instead of extending StatsController \u2014           │
+│ considered viable but extending StatsController was preferred to keep all    │
+│ /api/stats/* handling co-located and minimize new files, reducing review     │
+│ surface.",                                                                   │
+│     "Perform aggregation in Java after fetching all ClickEvent rows for a    │
+│ code instead of via JPQL GROUP BY \u2014 rejected as primary approach:       │
+│ pushes unnecessary rows over JDBC and duplicates logic the DB can do         │
+│ natively; kept only as an implementation fallback note if H2 date-truncation │
+│ functions prove awkward.",                                                   │
+│     "Apply the rate limiter to the new GET endpoint for consistency with a   │
+│ stricter future policy \u2014 rejected: FR12 explicitly requires no change   │
+│ to rate limiter rules/config, and existing GET endpoints are already exempt, │
+│ so parity with existing GETs is the correct behavior."                       │
+│   ],                                                                         │
+│   "risks": [                                                                 │
+│     {                                                                        │
+│       "risk": "H2's DATE()/CAST(... AS DATE) truncation on a stored          │
+│ Instant/timestamp column may use JVM/session default timezone instead of     │
+│ true UTC, causing calendar-day misattribution near midnight.",               │
+│       "impact": "Clicks near day boundaries could be grouped into the wrong  │
+│ date, violating FR5/FR6, and could differ between environments with          │
+│ different default timezones.",                                               │
+│       "mitigation": "Store clickedAt as an Instant mapped to a TIMESTAMP     │
+│ column with explicit UTC semantics, and set                                  │
+│ spring.jpa.properties.hibernate.jdbc.time_zone=UTC (and/or JVM               │
+│ -Duser.timezone=UTC) so the DB session normalizes to UTC; alternatively      │
+│ compute the day-truncation in Java                                           │
+│ (event.getClickedAt().atZone(ZoneOffset.UTC).toLocalDate()) after fetching   │
+│ raw timestamps grouped by code, avoiding reliance on H2 date functions       │
+│ entirely for correctness-critical logic; add a unit test with a click at     │
+│ 23:59:59Z and 00:00:00Z to verify correct bucketing."                        │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Unbounded growth of the ClickEvent table for high-traffic     │
+│ codes, since H2 is in-memory and there is no pagination/retention policy     │
+│ (FR10 explicitly disallows pagination in this version).",                    │
+│       "impact": "Memory pressure and slower aggregation queries over time    │
+│ for popular codes; potential OOM on the embedded H2 instance under sustained │
+│ load.",                                                                      │
+│       "mitigation": "Document as an accepted scope limitation per FR10 (no   │
+│ pagination in this version); add an index on ClickEvent(code, clicked_at) to │
+│ keep aggregation queries performant; flag retention/partitioning as a        │
+│ follow-up governance item rather than solving in this change."               │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Adding a second write (ClickEvent insert) inside the same     │
+│ transactional redirect path as the existing                                  │
+│ incrementClickCount()/save(mapping) could introduce a performance regression │
+│ or new failure mode (e.g., transaction rollback due to ClickEvent constraint │
+│ violation) that breaks the previously reliable 302 redirect response.",      │
+│       "impact": "Regression in existing redirect endpoint's                  │
+│ reliability/latency, violating FR14's no-regression requirement.",           │
+│       "mitigation": "Keep ClickEvent as a minimal, constraint-light entity   │
+│ (no unique constraints beyond PK, code column not FK-enforced to avoid       │
+│ coupling failures), insert it via the same repository/transaction as the     │
+│ click-count increment so both succeed or fail atomically without added       │
+│ complexity, and add integration tests asserting unchanged 302                │
+│ status/Location header/timing characteristics after the change."             │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Malformed or unknown {code} path values need to consistently  │
+│ return 404 for the new /daily endpoint exactly as they do for the existing   │
+│ /api/stats/{code} endpoint (FR15), but if the new handler is implemented     │
+│ with a different validation path (e.g., a regex pre-check) than the existing │
+│ lookup-then-throw pattern, behavior could diverge.",                         │
+│       "impact": "Inconsistent error semantics between sibling endpoints,     │
+│ confusing API consumers and potentially breaking FR15/FR14 parity            │
+│ expectations.",                                                              │
+│       "mitigation": "Reuse the exact same                                    │
+│ UrlMappingRepository.findByCode(...).orElseThrow(CodeNotFoundException)      │
+│ pattern already used by the existing stats/redirect lookups for the new      │
+│ dailyStats() method, rather than introducing new regex validation logic,     │
+│ ensuring malformed and unknown codes are handled identically via the single  │
+│ existing code path."                                                         │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Test suite explicitly asserts that only POST /api/shorten is  │
+│ rate-limited and all GETs bypass the filter; adding a new GET endpoint under │
+│ /api/stats/ could be inadvertently caught if isRateLimited()'s matching      │
+│ logic is ever refactored carelessly during this change.",                    │
+│       "impact": "Would violate FR12 (no modification to rate limiter         │
+│ enforcement) and could unexpectedly rate-limit or fail to rate-limit         │
+│ endpoints.",                                                                 │
+│       "mitigation": "Make zero changes to ShortenRateLimitFilter; add a new  │
+│ integration test asserting GET /api/stats/{code}/daily is never rate-limited │
+│ even under burst requests, alongside existing filter tests, to lock in the   │
+│ bypass behavior as a regression guard."                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "JSON serialization of the new DailyClickCount record might    │
+│ not produce the exact two-field shape required by FR4 (e.g., Jackson adding  │
+│ extra fields, wrong date format, or long vs int clicks type causing subtle   │
+│ client parsing issues).",                                                    │
+│       "impact": "Contract violation of FR4, breaking API consumers expecting │
+│ exactly {date, clicks}.",                                                    │
+│       "mitigation": "Use a plain Java record with only date (String,         │
+│ pre-formatted as YYYY-MM-DD) and clicks (long) fields, no additional         │
+│ annotations needed since Jackson serializes records' accessor-derived fields │
+│ by default; add a contract test asserting the exact JSON keys and format via │
+│ a known fixture."                                                            │
+│     }                                                                        │
+│   ]                                                                          │
+│ }                                                                            │
+│ risks: [                                                                     │
+│   {                                                                          │
+│     "risk": "Adding per-click timestamp persistence inside (or alongside)    │
+│ resolveAndRecordClick could change its transaction boundaries, throw new     │
+│ exceptions, or slow down the hot redirect path",                             │
+│     "impact": "GET /{code} could start failing, returning different status   │
+│ codes, or exhibiting latency regressions on the most-used endpoint (FR14     │
+│ explicitly forbids any behavior change here)",                               │
+│     "mitigation": "Add the click-event insert as an additional, non-blocking │
+│ operation within the same @Transactional method, verify it cannot throw      │
+│ checked/unchecked exceptions that escape to the controller, and keep         │
+│ asserting the existing ShortenControllerWebTest/UrlShortenerServiceTest      │
+│ cases (302+Location, clicks increment) pass unmodified"                      │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Introducing a new entity/table for click events under           │
+│ ddl-auto=update with no migration tool (no Flyway/Liquibase) could silently  │
+│ alter the schema in a way that's hard to reproduce consistently across       │
+│ environments, or clash with the existing url_mapping unique                  │
+│ constraints/indexes",                                                        │
+│     "impact": "Schema drift between dev/test/prod, or startup failures if    │
+│ the new mapping's naming collides with existing constraints (e.g.,           │
+│ idx_url_mapping_code)",                                                      │
+│     "mitigation": "Name new table/columns distinctly (e.g. click_event with  │
+│ its own indexes), add @DataJpaTest coverage analogous to                     │
+│ UrlMappingRepositoryTest, and confirm the H2 in-memory instance recreates    │
+│ cleanly on each test run"                                                    │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "New GET /api/stats/{code}/daily route could be shadowed by or   │
+│ could shadow existing path-mapping ordering with GET /api/stats/{code},      │
+│ since Spring MVC path variables can be ambiguous with literal path           │
+│ segments",                                                                   │
+│     "impact": "Either the new /daily route never gets hit (intercepted by    │
+│ the existing {code} matcher, needing to be explicitly checked) or, more      │
+│ likely here, is fine since Spring resolves literal segments before variables │
+│ \u2014 but this must be verified rather than assumed",                       │
+│     "mitigation": "Add explicit web-layer tests hitting both GET             │
+│ /api/stats/{code} and GET /api/stats/{code}/daily with codes containing no   │
+│ slash to confirm no routing collision, per FR14's 'no regression'            │
+│ requirement"                                                                 │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "The rate limiter's isRateLimited() matches on exact request URI │
+│ string '/api/shorten'; if the new endpoint or its implementation touches     │
+│ this filter at all (e.g., to 'reuse' rate limiting per FR12's wording), even │
+│ a well-intentioned edit could inadvertently start rate-limiting existing GET │
+│ endpoints or change MAX_REQUESTS_PER_WINDOW semantics",                      │
+│     "impact": "GET /api/stats/{code} or GET /{code} could start being        │
+│ rate-limited (violating FR14), or the new endpoint could be incorrectly      │
+│ rate-limited when the spec implies read endpoints are currently exempt",     │
+│     "mitigation": "Make zero changes to ShortenRateLimitFilter; rely on its  │
+│ existing shouldNotFilter() to naturally exempt the new GET route (since it   │
+│ isn't POST /api/shorten), and add a regression test analogous to             │
+│ excludedGetEndpointsBypassFilterEvenWhenSameIpSaturatedShortenLimit that     │
+│ includes the new /daily path"                                                │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "No authentication framework exists at all; if the change        │
+│ introduces any security dependency or filter to 'implement auth' for the new │
+│ endpoint (over-interpreting FR11), it could inadvertently add a security     │
+│ filter chain that intercepts and breaks all existing public endpoints",      │
+│     "impact": "All existing endpoints (shorten, redirect, stats) could start │
+│ requiring authentication or behave differently (e.g., 401s, CORS/CSRF filter │
+│ side effects), a severe regression",                                         │
+│     "mitigation": "Since FR11 states the new endpoint should mirror existing │
+│ (public/unauthenticated) behavior, do not add Spring Security or any auth    │
+│ mechanism; keep the new controller a plain @RestController identical in      │
+│ access-control posture to StatsController"                                   │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Ambiguity in how 'day boundary' should be computed if           │
+│ click-event timestamps are stored without explicit UTC normalization (e.g.,  │
+│ using default JVM timezone via java.util.Date or LocalDateTime.now() instead │
+│ of Instant/OffsetDateTime UTC)",                                             │
+│     "impact": "Daily aggregation could misattribute clicks to the wrong      │
+│ calendar day if server/JVM timezone isn't UTC, violating FR5",               │
+│     "mitigation": "Persist click timestamps as Instant (UTC-safe) and derive │
+│ the calendar day via Instant.atZone(ZoneOffset.UTC) explicitly in the        │
+│ aggregation query/service, with a unit test asserting correct day-bucketing  │
+│ independent of default timezone"                                             │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Malformed/syntactically-invalid codes (per FR15) need to return │
+│ 404 exactly like existing endpoints, but there's currently no explicit       │
+│ syntactic pre-validation anywhere (CodeGenerator's 7-char base62 rule is     │
+│ never enforced on inbound path variables) \u2014 a naive daily-stats         │
+│ implementation might introduce new validation logic that diverges from       │
+│ existing lookup-then-404 behavior",                                          │
+│     "impact": "Inconsistent 404 vs 400 behavior between /api/stats/{code}    │
+│ and /api/stats/{code}/daily for the same malformed code, or an unhandled     │
+│ exception (500) for edge-case inputs like very long codes or special         │
+│ characters",                                                                 │
+│     "mitigation": "Reuse the exact same lookup-first pattern (findByCode ->  │
+│ CodeNotFoundException -> 404) rather than adding new regex validation,       │
+│ matching how existing endpoints already treat any non-matching code as 404"  │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "H2's DATE()/CAST(... AS DATE) truncation on a stored            │
+│ Instant/timestamp column may use JVM/session default timezone instead of     │
+│ true UTC, causing calendar-day misattribution near midnight.",               │
+│     "impact": "Clicks near day boundaries could be grouped into the wrong    │
+│ date, violating FR5/FR6, and could differ between environments with          │
+│ different default timezones.",                                               │
+│     "mitigation": "Store clickedAt as an Instant mapped to a TIMESTAMP       │
+│ column with explicit UTC semantics, and set                                  │
+│ spring.jpa.properties.hibernate.jdbc.time_zone=UTC (and/or JVM               │
+│ -Duser.timezone=UTC) so the DB session normalizes to UTC; alternatively      │
+│ compute the day-truncation in Java                                           │
+│ (event.getClickedAt().atZone(ZoneOffset.UTC).toLocalDate()) after fetching   │
+│ raw timestamps grouped by code, avoiding reliance on H2 date functions       │
+│ entirely for correctness-critical logic; add a unit test with a click at     │
+│ 23:59:59Z and 00:00:00Z to verify correct bucketing."                        │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Unbounded growth of the ClickEvent table for high-traffic       │
+│ codes, since H2 is in-memory and there is no pagination/retention policy     │
+│ (FR10 explicitly disallows pagination in this version).",                    │
+│     "impact": "Memory pressure and slower aggregation queries over time for  │
+│ popular codes; potential OOM on the embedded H2 instance under sustained     │
+│ load.",                                                                      │
+│     "mitigation": "Document as an accepted scope limitation per FR10 (no     │
+│ pagination in this version); add an index on ClickEvent(code, clicked_at) to │
+│ keep aggregation queries performant; flag retention/partitioning as a        │
+│ follow-up governance item rather than solving in this change."               │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Adding a second write (ClickEvent insert) inside the same       │
+│ transactional redirect path as the existing                                  │
+│ incrementClickCount()/save(mapping) could introduce a performance regression │
+│ or new failure mode (e.g., transaction rollback due to ClickEvent constraint │
+│ violation) that breaks the previously reliable 302 redirect response.",      │
+│     "impact": "Regression in existing redirect endpoint's                    │
+│ reliability/latency, violating FR14's no-regression requirement.",           │
+│     "mitigation": "Keep ClickEvent as a minimal, constraint-light entity (no │
+│ unique constraints beyond PK, code column not FK-enforced to avoid coupling  │
+│ failures), insert it via the same repository/transaction as the click-count  │
+│ increment so both succeed or fail atomically without added complexity, and   │
+│ add integration tests asserting unchanged 302 status/Location header/timing  │
+│ characteristics after the change."                                           │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Malformed or unknown {code} path values need to consistently    │
+│ return 404 for the new /daily endpoint exactly as they do for the existing   │
+│ /api/stats/{code} endpoint (FR15), but if the new handler is implemented     │
+│ with a different validation path (e.g., a regex pre-check) than the existing │
+│ lookup-then-throw pattern, behavior could diverge.",                         │
+│     "impact": "Inconsistent error semantics between sibling endpoints,       │
+│ confusing API consumers and potentially breaking FR15/FR14 parity            │
+│ expectations.",                                                              │
+│     "mitigation": "Reuse the exact same                                      │
+│ UrlMappingRepository.findByCode(...).orElseThrow(CodeNotFoundException)      │
+│ pattern already used by the existing stats/redirect lookups for the new      │
+│ dailyStats() method, rather than introducing new regex validation logic,     │
+│ ensuring malformed and unknown codes are handled identically via the single  │
+│ existing code path."                                                         │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Test suite explicitly asserts that only POST /api/shorten is    │
+│ rate-limited and all GETs bypass the filter; adding a new GET endpoint under │
+│ /api/stats/ could be inadvertently caught if isRateLimited()'s matching      │
+│ logic is ever refactored carelessly during this change.",                    │
+│     "impact": "Would violate FR12 (no modification to rate limiter           │
+│ enforcement) and could unexpectedly rate-limit or fail to rate-limit         │
+│ endpoints.",                                                                 │
+│     "mitigation": "Make zero changes to ShortenRateLimitFilter; add a new    │
+│ integration test asserting GET /api/stats/{code}/daily is never rate-limited │
+│ even under burst requests, alongside existing filter tests, to lock in the   │
+│ bypass behavior as a regression guard."                                      │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "JSON serialization of the new DailyClickCount record might not  │
+│ produce the exact two-field shape required by FR4 (e.g., Jackson adding      │
+│ extra fields, wrong date format, or long vs int clicks type causing subtle   │
+│ client parsing issues).",                                                    │
+│     "impact": "Contract violation of FR4, breaking API consumers expecting   │
+│ exactly {date, clicks}.",                                                    │
+│     "mitigation": "Use a plain Java record with only date (String,           │
+│ pre-formatted as YYYY-MM-DD) and clicks (long) fields, no additional         │
+│ annotations needed since Jackson serializes records' accessor-derived fields │
+│ by default; add a contract test asserting the exact JSON keys and format via │
+│ a known fixture."                                                            │
+│   }                                                                          │
+│ ]                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────── run 2bfb10e8 is paused ───────────────────────────╮
+│   factory approve 2bfb10e8                    # approve                      │
+│   factory approve 2bfb10e8 --revise "..."     # request changes              │
+│   factory approve 2bfb10e8 --reject           # reject                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+● gate_design
+  human: revise
+  invalidated downstream stage: tasks
+● design
+  The service remains a single Spring Boot 3 deployable using its existing 
+layering: web controllers -> service layer -> Spring Data JPA repositories -> 
+embedded H2. The redirect flow (GET /{code}) is extended so that each successful
+resolution both increments the existing UrlMapping.click_count (unch
+╭───────────────────────────── HUMAN GATE: design ─────────────────────────────╮
+│ Approve architecture, API contract and data model?                           │
+│                                                                              │
+│ design: {                                                                    │
+│   "architecture": "The service remains a single Spring Boot 3 deployable     │
+│ using its existing layering: web controllers -> service layer -> Spring Data │
+│ JPA repositories -> embedded H2. The redirect flow (GET /{code}) is extended │
+│ so that each successful resolution both increments the existing              │
+│ UrlMapping.click_count (unchanged, preserving FR14) and inserts a new        │
+│ persisted row into a new ClickEvent table (code, clicked_at_utc as an        │
+│ Instant/UTC timestamp) inside the same transaction as the existing update.   │
+│ No in-memory counters or caches are used for aggregation: the new GET        │
+│ /api/stats/{code}/daily endpoint delegates to a new repository method that   │
+│ runs a single JPQL/native aggregate query (GROUP BY the UTC calendar date    │
+│ derived from clicked_at_utc, ORDER BY that date DESC) directly against the   │
+│ ClickEvent table, so results are always recomputed from durable storage and  │
+│ survive restarts. StatsController gains a new handler (or a sibling          │
+│ controller) that first verifies code existence via the existing              │
+│ UrlMappingRepository (reusing CodeNotFoundException/GlobalExceptionHandler   │
+│ for 404, identical to the current /api/stats/{code} 404 path), then calls    │
+│ the aggregation query and maps rows into a List<DailyClickCount> DTO with    │
+│ exactly {date, clicks}. The endpoint is registered as a plain GET mapping    │
+│ with no security filter attached (matching the codebase's fully-public       │
+│ posture) and is never touched by ShortenRateLimitFilter because that filter  │
+│ only matches POST /api/shorten by construction \u2014 no filter changes are  │
+│ made. Schema for the new table is created automatically by Hibernate         │
+│ ddl-auto=update against the same embedded H2 instance, requiring no          │
+│ migration tooling and no new dependencies.",                                 │
+│   "components": [                                                            │
+│     {                                                                        │
+│       "name": "ClickEvent (new JPA entity)",                                 │
+│       "responsibility": "Persist one durable row per successful redirect:    │
+│ short code (or FK to UrlMapping), and clicked_at_utc Instant. Source of      │
+│ truth for daily aggregation; independent of the existing click_count         │
+│ counter."                                                                    │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "ClickEventRepository (new Spring Data JPA repository)",       │
+│       "responsibility": "Expose a single aggregation query, e.g. a JPQL      │
+│ query grouping by CAST(clicked_at_utc AS DATE) (or                           │
+│ FUNCTION('FORMATDATETIME', ...) for H2) filtered by code, returning (date,   │
+│ count) projections ordered descending. All aggregation happens in the        │
+│ database, never in application memory."                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "UrlShortenerService (extended)",                              │
+│       "responsibility": "resolveAndRecordClick keeps its exact existing      │
+│ signature, return value, and side effects (increment + save UrlMapping), and │
+│ additionally persists a ClickEvent row in the same @Transactional method.    │
+│ New method dailyStats(code): (a) verifies code exists via                    │
+│ UrlMappingRepository, throwing the existing CodeNotFoundException if not,    │
+│ (b) delegates to ClickEventRepository's aggregate query, (c) maps DB         │
+│ projections to List<DailyClickCount> DTOs, already ordered date-descending   │
+│ by the query."                                                               │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "StatsController (extended) / DailyStatsController (new nested │
+│ handler)",                                                                   │
+│       "responsibility": "New @GetMapping(\"/api/stats/{code}/daily\")        │
+│ calling service.dailyStats(code), returning 200 + JSON array (or 200 + []    │
+│ for zero clicks). Existing GET /api/stats/{code} mapping and method are left │
+│ untouched, verified by regression tests."                                    │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "DailyClickCount (new DTO/record)",                            │
+│       "responsibility": "Immutable record with exactly two fields: date      │
+│ (String, YYYY-MM-DD) and clicks (long/int, non-negative), used solely for    │
+│ JSON serialization of the new endpoint's array elements."                    │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "GlobalExceptionHandler (unchanged)",                          │
+│       "responsibility": "Continues to translate CodeNotFoundException to     │
+│ HTTP 404 with the existing {\"error\": ...} shape, reused as-is for the new  │
+│ endpoint's not-found path \u2014 no divergent error format introduced."      │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "ShortenRateLimitFilter (unchanged, verified)",                │
+│       "responsibility": "Confirmed by inspection/test that isRateLimited()   │
+│ only matches POST /api/shorten; the new GET endpoint passes through          │
+│ untouched, with no code or config changes made to this filter."              │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "CodeGenerator / code-validation reuse (unchanged)",           │
+│       "responsibility": "The new endpoint performs no separate regex         │
+│ pre-check; a syntactically invalid or unknown code simply fails findByCode   │
+│ lookup, uniformly producing 404 via the same path as existing endpoints      │
+│ (FR15)."                                                                     │
+│     }                                                                        │
+│   ],                                                                         │
+│   "api_contract": [                                                          │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/api/stats/{code}/daily",                                     │
+│       "request": "Path parameter 'code' (string, short code). No query       │
+│ parameters, no request body, no auth headers required (matches existing      │
+│ public stats endpoint).",                                                    │
+│       "response": "200: JSON array of objects [{\"date\": \"YYYY-MM-DD\",    │
+│ \"clicks\": <non-negative integer>}, ...] ordered date descending, omitting  │
+│ zero-click days, empty array [] if code exists but has no clicks. 404:       │
+│ existing uniform {\"error\": \"...\"} body from GlobalExceptionHandler,      │
+│ identical shape to current /api/stats/{code} 404.",                          │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         404                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/api/stats/{code}",                                           │
+│       "request": "Unchanged \u2014 path parameter 'code'.",                  │
+│       "response": "Unchanged \u2014 {code, url, clicks} from aggregate       │
+│ click_count.",                                                               │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         404                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/{code}",                                                     │
+│       "request": "Unchanged \u2014 path parameter 'code'.",                  │
+│       "response": "Unchanged \u2014 302 redirect with Location header; side  │
+│ effect now additionally persists a ClickEvent row, but response contract is  │
+│ byte-for-byte identical.",                                                   │
+│       "status_codes": [                                                      │
+│         302,                                                                 │
+│         404                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "POST",                                                      │
+│       "path": "/api/shorten",                                                │
+│       "request": "Unchanged.",                                               │
+│       "response": "Unchanged, still subject to the existing rate limiter     │
+│ with no config/implementation changes.",                                     │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         201,                                                                 │
+│         400,                                                                 │
+│         429                                                                  │
+│       ]                                                                      │
+│     }                                                                        │
+│   ],                                                                         │
+│   "data_model": [                                                            │
+│     {                                                                        │
+│       "entity": "UrlMapping (existing, unchanged)",                          │
+│       "fields": [                                                            │
+│         "id: Long",                                                          │
+│         "code: String",                                                      │
+│         "originalUrl: String",                                               │
+│         "clickCount: long"                                                   │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "entity": "ClickEvent (new)",                                          │
+│       "fields": [                                                            │
+│         "id: Long (auto-generated PK)",                                      │
+│         "code: String (indexed, matches UrlMapping.code; optionally FK to    │
+│ UrlMapping.id)",                                                             │
+│         "clickedAtUtc: Instant (UTC timestamp, non-null, set at redirect     │
+│ time via Instant.now(Clock.systemUTC()) or equivalent)"                      │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "entity": "DailyClickCount (new, transient DTO/record, not             │
+│ persisted)",                                                                 │
+│       "fields": [                                                            │
+│         "date: String (YYYY-MM-DD, UTC calendar day)",                       │
+│         "clicks: long (non-negative)"                                        │
+│       ]                                                                      │
+│     }                                                                        │
+│   ],                                                                         │
+│   "alternatives_considered": [                                               │
+│     "In-memory aggregation (counting/caching click timestamps in a           │
+│ service-level map or Guava-style cache) \u2014 rejected per explicit human   │
+│ revision: does not survive restarts and violates the requirement that        │
+│ analytics be durable and DB-backed.",                                        │
+│     "Reuse the existing click_count long as the sole data source and         │
+│ back-derive daily buckets from it \u2014 rejected because click_count has no │
+│ timestamp granularity; daily aggregation is structurally impossible without  │
+│ per-event or per-day persisted records (per FR13 and impact analysis).",     │
+│     "Maintain a separate pre-aggregated per-(code, day) counter table        │
+│ updated incrementally on each redirect, instead of raw per-click event rows  │
+│ \u2014 viable alternative to the chosen design; not selected as primary      │
+│ because it requires an extra day-boundary computation and a                  │
+│ read-modify-write (with associated concurrency/locking risk) on every        │
+│ redirect, whereas a per-click event log with an aggregate query is simpler   │
+│ to reason about and less invasive to the hot redirect path; documented as an │
+│ acceptable variant if row volume/performance later requires it (see          │
+│ risks).",                                                                    │
+│     "Introduce Spring Security for authorization on the new endpoint \u2014  │
+│ rejected because the codebase has zero existing auth framework and all       │
+│ comparable read endpoints (GET /api/stats/{code}) are public; adding a new   │
+│ dependency/governance event for one endpoint would contradict FR11 and the   │
+│ 'no new dependency without governance' constraint.",                         │
+│     "Add a Flyway/Liquibase migration for the new table \u2014 rejected as   │
+│ an unnecessary new dependency; ddl-auto=update against embedded H2 already   │
+│ auto-creates the schema and is consistent with the existing project's        │
+│ approach.",                                                                  │
+│     "Extend ShortenRateLimitFilter to also cover the new GET endpoint \u2014 │
+│ rejected per FR12, which explicitly forbids any modification to the rate     │
+│ limiter's implementation or configuration; the new endpoint intentionally    │
+│ remains unthrottled like all other GETs."                                    │
+│   ],                                                                         │
+│   "risks": [                                                                 │
+│     {                                                                        │
+│       "risk": "Unbounded growth of the ClickEvent table for high-traffic     │
+│ codes, since every redirect now writes a row with no retention/pruning       │
+│ policy.",                                                                    │
+│       "impact": "Increasing storage/memory pressure on the embedded H2       │
+│ instance over time, slower aggregation queries, and potential OOM in         │
+│ long-running deployments without restarts.",                                 │
+│       "mitigation": "Document this as a known v1 limitation (consistent with │
+│ FR10's 'no pagination/truncation' requirement); add an index on (code,       │
+│ clickedAtUtc) to keep aggregation queries fast; flag a follow-up governance  │
+│ item for a retention/archival job or the per-day-counter-table alternative   │
+│ if volumes grow."                                                            │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Database-specific date-truncation SQL (e.g. H2's              │
+│ FORMATDATETIME/CAST AS DATE) may not translate correctly through JPQL or may │
+│ behave differently if the embedded DB is ever swapped.",                     │
+│       "impact": "Incorrect day-bucketing (off-by-one due to timezone         │
+│ handling) or query failures at startup.",                                    │
+│       "mitigation": "Explicitly store clickedAtUtc as Instant/TIMESTAMP WITH │
+│ TIME ZONE-equivalent and truncate using a native query or Java-side          │
+│ truncation via a small, well-tested repository method (e.g. @Query with      │
+│ CAST(clicked_at_utc AS DATE) verified against H2); add a unit test asserting │
+│ correct UTC day boundaries for timestamps near midnight (23:59:59 vs         │
+│ 00:00:00 boundary)."                                                         │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Adding a second write (ClickEvent insert) inside              │
+│ resolveAndRecordClick could change redirect latency, fail independently of   │
+│ the click_count update, or partially commit under transaction                │
+│ misconfiguration.",                                                          │
+│       "impact": "Redirect endpoint could become slower, or worse, could      │
+│ return a 5xx / change its existing 302 contract if the new insert throws and │
+│ isn't isolated, violating FR13/FR14.",                                       │
+│       "mitigation": "Wrap both the click_count increment and ClickEvent      │
+│ insert in the same existing @Transactional boundary so they succeed/fail     │
+│ atomically without changing the method's return type or thrown exceptions;   │
+│ add a regression test asserting the redirect endpoint's status code/Location │
+│ header are unchanged even under simulated ClickEvent insert failure paths in │
+│ code review."                                                                │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Concurrent redirects for the same code under load could cause │
+│ write contention on the new table/index, or race conditions between the      │
+│ click_count increment and ClickEvent insert leading to slight count          │
+│ mismatches between /api/stats/{code} and /api/stats/{code}/daily (sum of     │
+│ daily clicks vs click_count).",                                              │
+│       "impact": "Minor analytic inconsistency between the two stats          │
+│ endpoints under high concurrency; not a correctness-breaking issue but could │
+│ confuse consumers comparing totals.",                                        │
+│       "mitigation": "Document that click_count and the daily-stats sum are   │
+│ eventually-consistent-by-design (both are best-effort counters), not         │
+│ guaranteed bit-identical under concurrent load; keep both writes in one      │
+│ transaction to minimize the window; add a test verifying they match under    │
+│ sequential/non-concurrent conditions."                                       │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "The new endpoint path /api/stats/{code}/daily could be        │
+│ inadvertently shadowed or conflict with Spring MVC path-matching against the │
+│ existing /api/stats/{code} mapping (e.g. 'daily' being captured as {code} of │
+│ a different mapping, or ambiguous mapping resolution).",                     │
+│       "impact": "Incorrect routing causing the new endpoint to never be      │
+│ reached, or the existing endpoint's behavior to change for a code literally  │
+│ named 'daily'.",                                                             │
+│       "mitigation": "Use Spring's standard more-specific-path-wins           │
+│ resolution (verified in MVC test), add explicit integration tests for both   │
+│ GET /api/stats/{code} and GET /api/stats/{code}/daily including an edge-case │
+│ code value equal to a path segment, and add a test asserting a real code     │
+│ named 'daily' still round-trips correctly through /api/stats/daily."         │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Hibernate ddl-auto=update silently altering/creating the new  │
+│ table at startup could mask schema drift or fail silently in edge cases      │
+│ (e.g. type mapping issues for Instant in H2).",                              │
+│       "impact": "New table might not be created correctly in some            │
+│ environments, causing runtime exceptions on first redirect after deployment  │
+│ rather than at startup.",                                                    │
+│       "mitigation": "Add a startup smoke test / integration test that        │
+│ shortens a URL, hits the redirect endpoint, and immediately queries /daily   │
+│ to confirm end-to-end schema correctness in CI before relying on ddl-auto in │
+│ any environment beyond this embedded/dev setup."                             │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Treating a syntactically invalid code (e.g. containing        │
+│ special characters that break URL path parsing) as 404 might interact oddly  │
+│ with Spring's path-variable decoding for the new nested path segment.",      │
+│       "impact": "Malformed codes could produce a 400 from Spring's routing   │
+│ layer instead of the expected 404, inconsistent with FR15 and existing       │
+│ endpoint behavior.",                                                         │
+│       "mitigation": "Reuse the exact same lookup-then-CodeNotFoundException  │
+│ pattern as the existing controllers (no new regex layer), and add a test     │
+│ with a malformed code (e.g. containing '/', encoded characters) against      │
+│ /daily asserting it still resolves to 404 rather than a routing-level error, │
+│ mirroring existing endpoint tests for the same case."                        │
+│     }                                                                        │
+│   ]                                                                          │
+│ }                                                                            │
+│ risks: [                                                                     │
+│   {                                                                          │
+│     "risk": "Adding per-click timestamp persistence inside (or alongside)    │
+│ resolveAndRecordClick could change its transaction boundaries, throw new     │
+│ exceptions, or slow down the hot redirect path",                             │
+│     "impact": "GET /{code} could start failing, returning different status   │
+│ codes, or exhibiting latency regressions on the most-used endpoint (FR14     │
+│ explicitly forbids any behavior change here)",                               │
+│     "mitigation": "Add the click-event insert as an additional, non-blocking │
+│ operation within the same @Transactional method, verify it cannot throw      │
+│ checked/unchecked exceptions that escape to the controller, and keep         │
+│ asserting the existing ShortenControllerWebTest/UrlShortenerServiceTest      │
+│ cases (302+Location, clicks increment) pass unmodified"                      │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Introducing a new entity/table for click events under           │
+│ ddl-auto=update with no migration tool (no Flyway/Liquibase) could silently  │
+│ alter the schema in a way that's hard to reproduce consistently across       │
+│ environments, or clash with the existing url_mapping unique                  │
+│ constraints/indexes",                                                        │
+│     "impact": "Schema drift between dev/test/prod, or startup failures if    │
+│ the new mapping's naming collides with existing constraints (e.g.,           │
+│ idx_url_mapping_code)",                                                      │
+│     "mitigation": "Name new table/columns distinctly (e.g. click_event with  │
+│ its own indexes), add @DataJpaTest coverage analogous to                     │
+│ UrlMappingRepositoryTest, and confirm the H2 in-memory instance recreates    │
+│ cleanly on each test run"                                                    │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "New GET /api/stats/{code}/daily route could be shadowed by or   │
+│ could shadow existing path-mapping ordering with GET /api/stats/{code},      │
+│ since Spring MVC path variables can be ambiguous with literal path           │
+│ segments",                                                                   │
+│     "impact": "Either the new /daily route never gets hit (intercepted by    │
+│ the existing {code} matcher, needing to be explicitly checked) or, more      │
+│ likely here, is fine since Spring resolves literal segments before variables │
+│ \u2014 but this must be verified rather than assumed",                       │
+│     "mitigation": "Add explicit web-layer tests hitting both GET             │
+│ /api/stats/{code} and GET /api/stats/{code}/daily with codes containing no   │
+│ slash to confirm no routing collision, per FR14's 'no regression'            │
+│ requirement"                                                                 │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "The rate limiter's isRateLimited() matches on exact request URI │
+│ string '/api/shorten'; if the new endpoint or its implementation touches     │
+│ this filter at all (e.g., to 'reuse' rate limiting per FR12's wording), even │
+│ a well-intentioned edit could inadvertently start rate-limiting existing GET │
+│ endpoints or change MAX_REQUESTS_PER_WINDOW semantics",                      │
+│     "impact": "GET /api/stats/{code} or GET /{code} could start being        │
+│ rate-limited (violating FR14), or the new endpoint could be incorrectly      │
+│ rate-limited when the spec implies read endpoints are currently exempt",     │
+│     "mitigation": "Make zero changes to ShortenRateLimitFilter; rely on its  │
+│ existing shouldNotFilter() to naturally exempt the new GET route (since it   │
+│ isn't POST /api/shorten), and add a regression test analogous to             │
+│ excludedGetEndpointsBypassFilterEvenWhenSameIpSaturatedShortenLimit that     │
+│ includes the new /daily path"                                                │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "No authentication framework exists at all; if the change        │
+│ introduces any security dependency or filter to 'implement auth' for the new │
+│ endpoint (over-interpreting FR11), it could inadvertently add a security     │
+│ filter chain that intercepts and breaks all existing public endpoints",      │
+│     "impact": "All existing endpoints (shorten, redirect, stats) could start │
+│ requiring authentication or behave differently (e.g., 401s, CORS/CSRF filter │
+│ side effects), a severe regression",                                         │
+│     "mitigation": "Since FR11 states the new endpoint should mirror existing │
+│ (public/unauthenticated) behavior, do not add Spring Security or any auth    │
+│ mechanism; keep the new controller a plain @RestController identical in      │
+│ access-control posture to StatsController"                                   │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Ambiguity in how 'day boundary' should be computed if           │
+│ click-event timestamps are stored without explicit UTC normalization (e.g.,  │
+│ using default JVM timezone via java.util.Date or LocalDateTime.now() instead │
+│ of Instant/OffsetDateTime UTC)",                                             │
+│     "impact": "Daily aggregation could misattribute clicks to the wrong      │
+│ calendar day if server/JVM timezone isn't UTC, violating FR5",               │
+│     "mitigation": "Persist click timestamps as Instant (UTC-safe) and derive │
+│ the calendar day via Instant.atZone(ZoneOffset.UTC) explicitly in the        │
+│ aggregation query/service, with a unit test asserting correct day-bucketing  │
+│ independent of default timezone"                                             │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Malformed/syntactically-invalid codes (per FR15) need to return │
+│ 404 exactly like existing endpoints, but there's currently no explicit       │
+│ syntactic pre-validation anywhere (CodeGenerator's 7-char base62 rule is     │
+│ never enforced on inbound path variables) \u2014 a naive daily-stats         │
+│ implementation might introduce new validation logic that diverges from       │
+│ existing lookup-then-404 behavior",                                          │
+│     "impact": "Inconsistent 404 vs 400 behavior between /api/stats/{code}    │
+│ and /api/stats/{code}/daily for the same malformed code, or an unhandled     │
+│ exception (500) for edge-case inputs like very long codes or special         │
+│ characters",                                                                 │
+│     "mitigation": "Reuse the exact same lookup-first pattern (findByCode ->  │
+│ CodeNotFoundException -> 404) rather than adding new regex validation,       │
+│ matching how existing endpoints already treat any non-matching code as 404"  │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "H2's DATE()/CAST(... AS DATE) truncation on a stored            │
+│ Instant/timestamp column may use JVM/session default timezone instead of     │
+│ true UTC, causing calendar-day misattribution near midnight.",               │
+│     "impact": "Clicks near day boundaries could be grouped into the wrong    │
+│ date, violating FR5/FR6, and could differ between environments with          │
+│ different default timezones.",                                               │
+│     "mitigation": "Store clickedAt as an Instant mapped to a TIMESTAMP       │
+│ column with explicit UTC semantics, and set                                  │
+│ spring.jpa.properties.hibernate.jdbc.time_zone=UTC (and/or JVM               │
+│ -Duser.timezone=UTC) so the DB session normalizes to UTC; alternatively      │
+│ compute the day-truncation in Java                                           │
+│ (event.getClickedAt().atZone(ZoneOffset.UTC).toLocalDate()) after fetching   │
+│ raw timestamps grouped by code, avoiding reliance on H2 date functions       │
+│ entirely for correctness-critical logic; add a unit test with a click at     │
+│ 23:59:59Z and 00:00:00Z to verify correct bucketing."                        │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Unbounded growth of the ClickEvent table for high-traffic       │
+│ codes, since H2 is in-memory and there is no pagination/retention policy     │
+│ (FR10 explicitly disallows pagination in this version).",                    │
+│     "impact": "Memory pressure and slower aggregation queries over time for  │
+│ popular codes; potential OOM on the embedded H2 instance under sustained     │
+│ load.",                                                                      │
+│     "mitigation": "Document as an accepted scope limitation per FR10 (no     │
+│ pagination in this version); add an index on ClickEvent(code, clicked_at) to │
+│ keep aggregation queries performant; flag retention/partitioning as a        │
+│ follow-up governance item rather than solving in this change."               │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Adding a second write (ClickEvent insert) inside the same       │
+│ transactional redirect path as the existing                                  │
+│ incrementClickCount()/save(mapping) could introduce a performance regression │
+│ or new failure mode (e.g., transaction rollback due to ClickEvent constraint │
+│ violation) that breaks the previously reliable 302 redirect response.",      │
+│     "impact": "Regression in existing redirect endpoint's                    │
+│ reliability/latency, violating FR14's no-regression requirement.",           │
+│     "mitigation": "Keep ClickEvent as a minimal, constraint-light entity (no │
+│ unique constraints beyond PK, code column not FK-enforced to avoid coupling  │
+│ failures), insert it via the same repository/transaction as the click-count  │
+│ increment so both succeed or fail atomically without added complexity, and   │
+│ add integration tests asserting unchanged 302 status/Location header/timing  │
+│ characteristics after the change."                                           │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Malformed or unknown {code} path values need to consistently    │
+│ return 404 for the new /daily endpoint exactly as they do for the existing   │
+│ /api/stats/{code} endpoint (FR15), but if the new handler is implemented     │
+│ with a different validation path (e.g., a regex pre-check) than the existing │
+│ lookup-then-throw pattern, behavior could diverge.",                         │
+│     "impact": "Inconsistent error semantics between sibling endpoints,       │
+│ confusing API consumers and potentially breaking FR15/FR14 parity            │
+│ expectations.",                                                              │
+│     "mitigation": "Reuse the exact same                                      │
+│ UrlMappingRepository.findByCode(...).orElseThrow(CodeNotFoundException)      │
+│ pattern already used by the existing stats/redirect lookups for the new      │
+│ dailyStats() method, rather than introducing new regex validation logic,     │
+│ ensuring malformed and unknown codes are handled identically via the single  │
+│ existing code path."                                                         │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Test suite explicitly asserts that only POST /api/shorten is    │
+│ rate-limited and all GETs bypass the filter; adding a new GET endpoint under │
+│ /api/stats/ could be inadvertently caught if isRateLimited()'s matching      │
+│ logic is ever refactored carelessly during this change.",                    │
+│     "impact": "Would violate FR12 (no modification to rate limiter           │
+│ enforcement) and could unexpectedly rate-limit or fail to rate-limit         │
+│ endpoints.",                                                                 │
+│     "mitigation": "Make zero changes to ShortenRateLimitFilter; add a new    │
+│ integration test asserting GET /api/stats/{code}/daily is never rate-limited │
+│ even under burst requests, alongside existing filter tests, to lock in the   │
+│ bypass behavior as a regression guard."                                      │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "JSON serialization of the new DailyClickCount record might not  │
+│ produce the exact two-field shape required by FR4 (e.g., Jackson adding      │
+│ extra fields, wrong date format, or long vs int clicks type causing subtle   │
+│ client parsing issues).",                                                    │
+│     "impact": "Contract violation of FR4, breaking API consumers expecting   │
+│ exactly {date, clicks}.",                                                    │
+│     "mitigation": "Use a plain Java record with only date (String,           │
+│ pre-formatted as YYYY-MM-DD) and clicks (long) fields, no additional         │
+│ annotations needed since Jackson serializes records' accessor-derived fields │
+│ by default; add a contract test asserting the exact JSON keys and format via │
+│ a known fixture."                                                            │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Unbounded growth of the ClickEvent table for high-traffic       │
+│ codes, since every redirect now writes a row with no retention/pruning       │
+│ policy.",                                                                    │
+│     "impact": "Increasing storage/memory pressure on the embedded H2         │
+│ instance over time, slower aggregation queries, and potential OOM in         │
+│ long-running deployments without restarts.",                                 │
+│     "mitigation": "Document this as a known v1 limitation (consistent with   │
+│ FR10's 'no pagination/truncation' requirement); add an index on (code,       │
+│ clickedAtUtc) to keep aggregation queries fast; flag a follow-up governance  │
+│ item for a retention/archival job or the per-day-counter-table alternative   │
+│ if volumes grow."                                                            │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Database-specific date-truncation SQL (e.g. H2's                │
+│ FORMATDATETIME/CAST AS DATE) may not translate correctly through JPQL or may │
+│ behave differently if the embedded DB is ever swapped.",                     │
+│     "impact": "Incorrect day-bucketing (off-by-one due to timezone handling) │
+│ or query failures at startup.",                                              │
+│     "mitigation": "Explicitly store clickedAtUtc as Instant/TIMESTAMP WITH   │
+│ TIME ZONE-equivalent and truncate using a native query or Java-side          │
+│ truncation via a small, well-tested repository method (e.g. @Query with      │
+│ CAST(clicked_at_utc AS DATE) verified against H2); add a unit test asserting │
+│ correct UTC day boundaries for timestamps near midnight (23:59:59 vs         │
+│ 00:00:00 boundary)."                                                         │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Adding a second write (ClickEvent insert) inside                │
+│ resolveAndRecordClick could change redirect latency, fail independently of   │
+│ the click_count update, or partially commit under transaction                │
+│ misconfiguration.",                                                          │
+│     "impact": "Redirect endpoint could become slower, or worse, could return │
+│ a 5xx / change its existing 302 contract if the new insert throws and isn't  │
+│ isolated, violating FR13/FR14.",                                             │
+│     "mitigation": "Wrap both the click_count increment and ClickEvent insert │
+│ in the same existing @Transactional boundary so they succeed/fail atomically │
+│ without changing the method's return type or thrown exceptions; add a        │
+│ regression test asserting the redirect endpoint's status code/Location       │
+│ header are unchanged even under simulated ClickEvent insert failure paths in │
+│ code review."                                                                │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Concurrent redirects for the same code under load could cause   │
+│ write contention on the new table/index, or race conditions between the      │
+│ click_count increment and ClickEvent insert leading to slight count          │
+│ mismatches between /api/stats/{code} and /api/stats/{code}/daily (sum of     │
+│ daily clicks vs click_count).",                                              │
+│     "impact": "Minor analytic inconsistency between the two stats endpoints  │
+│ under high concurrency; not a correctness-breaking issue but could confuse   │
+│ consumers comparing totals.",                                                │
+│     "mitigation": "Document that click_count and the daily-stats sum are     │
+│ eventually-consistent-by-design (both are best-effort counters), not         │
+│ guaranteed bit-identical under concurrent load; keep both writes in one      │
+│ transaction to minimize the window; add a test verifying they match under    │
+│ sequential/non-concurrent conditions."                                       │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "The new endpoint path /api/stats/{code}/daily could be          │
+│ inadvertently shadowed or conflict with Spring MVC path-matching against the │
+│ existing /api/stats/{code} mapping (e.g. 'daily' being captured as {code} of │
+│ a different mapping, or ambiguous mapping resolution).",                     │
+│     "impact": "Incorrect routing causing the new endpoint to never be        │
+│ reached, or the existing endpoint's behavior to change for a code literally  │
+│ named 'daily'.",                                                             │
+│     "mitigation": "Use Spring's standard more-specific-path-wins resolution  │
+│ (verified in MVC test), add explicit integration tests for both GET          │
+│ /api/stats/{code} and GET /api/stats/{code}/daily including an edge-case     │
+│ code value equal to a path segment, and add a test asserting a real code     │
+│ named 'daily' still round-trips correctly through /api/stats/daily."         │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Hibernate ddl-auto=update silently altering/creating the new    │
+│ table at startup could mask schema drift or fail silently in edge cases      │
+│ (e.g. type mapping issues for Instant in H2).",                              │
+│     "impact": "New table might not be created correctly in some              │
+│ environments, causing runtime exceptions on first redirect after deployment  │
+│ rather than at startup.",                                                    │
+│     "mitigation": "Add a startup smoke test / integration test that shortens │
+│ a URL, hits the redirect endpoint, and immediately queries /daily to confirm │
+│ end-to-end schema correctness in CI before relying on ddl-auto in any        │
+│ environment beyond this embedded/dev setup."                                 │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Treating a syntactically invalid code (e.g. containing special  │
+│ characters that break URL path parsing) as 404 might interact oddly with     │
+│ Spring's path-variable decoding for the new nested path segment.",           │
+│     "impact": "Malformed codes could produce a 400 from Spring's routing     │
+│ layer instead of the expected 404, inconsistent with FR15 and existing       │
+│ endpoint behavior.",                                                         │
+│     "mitigation": "Reuse the exact same lookup-then-CodeNotFoundException    │
+│ pattern as the existing controllers (no new regex layer), and add a test     │
+│ with a malformed code (e.g. containing '/', encoded characters) against      │
+│ /daily asserting it still resolves to 404 rather than a routing-level error, │
+│ mirroring existing endpoint tests for the same case."                        │
+│   }                                                                          │
+│ ]                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────── run 2bfb10e8 is paused ───────────────────────────╮
+│   factory approve 2bfb10e8                    # approve                      │
+│   factory approve 2bfb10e8 --revise "..."     # request changes              │
+│   factory approve 2bfb10e8 --reject           # reject                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+● gate_design
+  human: approve
+● decompose
+  2 tasks: T1, T2
+● implement
+  T1 implemented: 6 files changed (attempt 1)
+● policy
+● tests
+● review
+● sync
+● commit
+  T1 committed
+--auto: approving gate 'merge'
+● gate_merge
+  human: approve merge of T1
+● integrate
+  T1 merged to main
+● implement
+  T2 attempt 1 aborted: error_during_execution
+● policy
+● tests
+● review
+● sync
+● implement
+  T2 implemented: 7 files changed (attempt 2)
+● policy
+● tests
+● review
+● sync
+● implement
+  T2 implemented: 7 files changed (attempt 3)
+● policy
+● tests
+● review
+● sync
+● acceptance
+● commit
+  T2 committed
+--auto: approving gate 'merge'
+● gate_merge
+  human: approve merge of T2
+● integrate
+  T2 merged to main
+● release
+  release ready
+● summary
+  engineering summary written to 
+/Users/hgokulakannan/sites/software-factory/runs/2bfb10e8/summary.md
+╭──────────────────────────────── run finished ────────────────────────────────╮
+│ sandbox: /tmp/factory/2bfb10e8                                               │
+│ head:    d9699de65586bc7b41e882a5ba65e34241e078ed                            │
+│ ready:   True                                                                │
+│ spend:   $2.79                                                               │
+│ summary:                                                                     │
+│ /Users/hgokulakannan/sites/software-factory/runs/2bfb10e8/summary.md         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+metrics: factory metrics 2bfb10e8

@@ -10,29 +10,25 @@ it cannot see.
 import time
 from pathlib import Path
 
-from factory.agent import claude
 from factory.observability import tracing
-from factory.agent.claude import analyst_role, extract_json
+from factory.agent.claude import analyst_role
 from factory.agent.prompts import ANALYST_SYSTEM_PROMPT, IMPACT_PROMPT
-from factory.stages.common import compact
+from factory.stages.common import call_json_role, compact
 from factory.state import FactoryState, metric_event, record_decision
 
 
 async def impact(state: FactoryState) -> dict:
     started = time.monotonic()
     prompt = IMPACT_PROMPT.substitute(spec=compact(state["spec"]))
-    role = analyst_role()
 
     with tracing.stage_span("impact", sandbox=state["sandbox"]):
-        with tracing.generation_span("impact", role.model, prompt) as span:
-            result = await claude.run_role(
-                role,
-                prompt,
-                cwd=Path(state["sandbox"]),
-                system_prompt=ANALYST_SYSTEM_PROMPT,
-            )
-            span.end_with(result)
-    data = extract_json(result.text)
+        data, cost = await call_json_role(
+            "impact",
+            analyst_role(),
+            prompt,
+            system_prompt=ANALYST_SYSTEM_PROMPT,
+            cwd=Path(state["sandbox"]),
+        )
 
     return {
         "impact": data,
@@ -52,7 +48,7 @@ async def impact(state: FactoryState) -> dict:
                 "stage_end",
                 "impact",
                 ok=True,
-                cost_usd=result.cost_usd,
+                cost_usd=cost,
                 duration_s=round(time.monotonic() - started, 3),
             )
         ],
