@@ -1,2 +1,6 @@
-* 6bb3820 (HEAD -> main, factory/t1) factory: scaffold from template java-springboot
-* 759a019 factory: initial commit
+*   e027de5 (HEAD -> factory/t2, main) factory: integrate T1
+|\  
+| * 4495186 (factory/t1) factory(T1): Project skeleton, persistence layer, and code generation
+|/  
+* 6cf443a factory: scaffold from template java-springboot
+* 3c51d49 factory: initial commit

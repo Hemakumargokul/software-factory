@@ -1,0 +1,164 @@
+[
+  {
+    "stage": "bootstrap",
+    "decision": "sandbox created from java-springboot",
+    "rationale": "seeded scaffold: the Maven wrapper jar is a binary an LLM cannot fabricate, so the template is copied, not generated",
+    "alternatives": [],
+    "commit_sha": "6cf443a7000278a6a6ec7f61f206a41d7b21ae83",
+    "trace_id": null,
+    "at": "2026-07-28T03:07:02.103808+00:00"
+  },
+  {
+    "stage": "intake",
+    "decision": "classified as ambiguous, ambiguity 0.35",
+    "rationale": "Build a new Spring-style (implied JVM) web service implementing a URL shortener with a strict HTTP contract: POST /api/shorten creates or returns an existing short code for a given absolute http/https URL (rejecting other schemes, malformed URLs, or missing fields with HTTP 400); GET /{code} redirects to the original URL or returns 404 if unknown; GET /api/stats/{code} returns the code, URL, and click count or 404 if unknown; POST /api/shorten is rate-limited to 30 requests/second per client IP ",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:07:18.128900+00:00"
+  },
+  {
+    "stage": "clarify",
+    "decision": "human answered clarification questions",
+    "rationale": "",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:07:18.134817+00:00"
+  },
+  {
+    "stage": "intake",
+    "decision": "classified as greenfield, ambiguity 0.25",
+    "rationale": "Build a new Spring Boot-style URL shortener web service exposing a fixed HTTP contract: POST /api/shorten to create or retrieve a short code for an absolute http/https URL (returning 201/200 with JSON {code, url}, deduplicating identical URLs to the same code, and returning 400 for invalid schemes, malformed URLs, or missing url field); GET /{code} to redirect (301/302) to the original URL or 404 if unknown; GET /api/stats/{code} to return click counts as JSON or 404 if unknown; a hand-rolled pe",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:07:32.939996+00:00"
+  },
+  {
+    "stage": "requirements",
+    "decision": "spec written with 20 acceptance criteria",
+    "rationale": "This specification defines a greenfield Spring Boot web service implementing a URL shortener with a fixed HTTP contract: creating/retrieving short codes for absolute http/https URLs via POST /api/shorten with deduplication and validation, redirecting via GET /{code}, exposing click statistics via GET /api/stats/{code}, enforcing a hand-rolled per-IP rate limit of 30 requests/second on the shorten endpoint, persisting all mappings and click counts in an embedded H2 database, and exposing a functi",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:08:15.198498+00:00"
+  },
+  {
+    "stage": "gate_requirements",
+    "decision": "human: approve",
+    "rationale": "requirement sign-off checkpoint",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:08:15.204522+00:00"
+  },
+  {
+    "stage": "design",
+    "decision": "Single Spring Boot 3 (Java 21) deployable on the existing Maven-wrapper scaffold, listening on port 8188 as pinned in application.properties. Layered design: a thin Web layer (three @RestController classes) receives HTTP requests; a Filter (ShortenRateLimitFilter, registered only for POST /api/short",
+    "rationale": "11 components, 4 endpoints, 9 risks identified",
+    "alternatives": [
+      "Bucket4j or Resilience4j for rate limiting \u2014 rejected: spec mandates hand-rolled limiter and adding either library is an unapproved governance event.",
+      "Redis or external cache for rate-limit counters/dedup lookup \u2014 rejected: constraint requires single deployable service with embedded database only; in-process ConcurrentHashMap suffices for single-instance assumption (FR11).",
+      "Random UUID-based codes truncated \u2014 rejected in favor of base62 counter/random hybrid: UUID substrings are not guaranteed collision-free and don't cleanly map to a fixed 7-char base62 alphabet requirement (FR4).",
+      "Sliding-log or token-bucket rate limiter \u2014 considered for precision but rejected in favor of simple fixed 1-second window counter per IP for implementation simplicity and to match 'fixed 1-second window' allowance in FR10 explicitly.",
+      "Storing URL normalized/lowercased for dedup \u2014 rejected: FR2 explicitly mandates case-sensitive, unnormalized exact string equality.",
+      "Using X-Forwarded-For for IP extraction \u2014 rejected: FR11 explicitly mandates HttpServletRequest.getRemoteAddr() only.",
+      "In-memory-only H2 (no persistence across restarts) vs file-based H2 \u2014 chose file-based (e.g., jdbc:h2:file:./data/urlshortener) to satisfy 'persisted' language robustly across restarts within constraints; in-memory mode remains an acceptable simpler alternative if test harness expects fresh state per run, but file-based better matches FR13's persistence intent and is still 'embedded database only'.",
+      "Adding spring-boot-starter-validation for request validation annotations \u2014 rejected: manual validation via java.net.URI and plain Java conditionals avoids introducing a new starter dependency, keeping within pre-approved set."
+    ],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:09:06.760414+00:00"
+  },
+  {
+    "stage": "gate_design",
+    "decision": "human: approve",
+    "rationale": "design sign-off checkpoint",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:09:06.768039+00:00"
+  },
+  {
+    "stage": "decompose",
+    "decision": "3 tasks: T1, T2, T3",
+    "rationale": "topologically ordered; dependency graph {'T1': [], 'T2': ['T1'], 'T3': ['T2']}",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:09:30.536752+00:00"
+  },
+  {
+    "stage": "implement",
+    "decision": "T1 implemented: 11 files changed (attempt 1)",
+    "rationale": "One subtlety: `seedCounter()` uses `repository.findAll()` to find max id \u2014 for large tables this is inefficient but functionally fine for T1 scope (a repo-level `findMaxId` custom query would be better, but findAll works and matches \"seeded at startup from max existing id\" requirement literally). This is acceptable for this task's scope. Everything looks consistent and correct.\n\n## Summary\n\nI set up the Spring Boot 3 (Java 21) project skeleton, persistence layer, and code generation as specified",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:11:08.435180+00:00"
+  },
+  {
+    "stage": "implement",
+    "decision": "T1 implemented: 26 files changed (attempt 2)",
+    "rationale": "Everything is consistent. The implementation is complete.\n\n## Summary\n\nThe previous attempt only delivered the T1 skeleton (entity, repository, code generator, actuator health) with no HTTP endpoints, so the full acceptance suite (which exercises the complete API contract) failed with 404s across the board. I added the missing web/service/rate-limit layers to make the app match the specified contract, on top of the existing, unmodified persistence/codegen layer:\n\n**New main sources:**\n- `web/Sho",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:14:39.965375+00:00"
+  },
+  {
+    "stage": "commit",
+    "decision": "T1 committed",
+    "rationale": "verification passed for this task",
+    "alternatives": [],
+    "commit_sha": "44951866b50b0f4da0fb1be7d7876c34b239dc41",
+    "trace_id": null,
+    "at": "2026-07-28T03:15:17.759038+00:00"
+  },
+  {
+    "stage": "gate_merge",
+    "decision": "human: approve merge of T1",
+    "rationale": "merge-to-main checkpoint",
+    "alternatives": [],
+    "commit_sha": "44951866b50b0f4da0fb1be7d7876c34b239dc41",
+    "trace_id": null,
+    "at": "2026-07-28T03:15:17.815240+00:00"
+  },
+  {
+    "stage": "integrate",
+    "decision": "T1 merged to main",
+    "rationale": "no-ff merge; every integration is a distinct auditable merge commit",
+    "alternatives": [],
+    "commit_sha": "e027de5fb5800aec5c086e7a3b928382acd82740",
+    "trace_id": null,
+    "at": "2026-07-28T03:15:17.927260+00:00"
+  },
+  {
+    "stage": "implement",
+    "decision": "T2 implemented: 1 files changed (attempt 1)",
+    "rationale": "Now let's double check `spring-boot-starter-test` includes JUnit 5 `ParameterizedTest` support (`junit-jupiter-params`) by default \u2014 yes, it's part of the JUnit 5 BOM pulled in transitively by `spring-boot-starter-test`.\n\nEverything looks complete and consistent with the existing codebase conventions.\n\n## Summary\n\nOn inspection, the repository already contained a complete implementation of the T2 scope (`UrlShortenerService`, `ShortenController`, `RedirectController`, `StatsController`, `GlobalE",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:17:00.992975+00:00"
+  },
+  {
+    "stage": "implement",
+    "decision": "T2 implemented: 3 files changed (attempt 2)",
+    "rationale": "`ActuatorHealthTest` only calls `/actuator/health` \u2014 no redirect involved, so its `@Autowired TestRestTemplate` (with default redirect-following behavior, whatever it is) is safe there.\n\n## Summary\n\n**Root cause identified:** In `ShortenControllerWebTest`, the `@Autowired TestRestTemplate restTemplate` field relied on Spring Boot's context-customizer-provided `TestRestTemplate` bean, whose redirect-following behavior is not guaranteed disabled (that guarantee only applies when explicitly constru",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:26:28.212123+00:00"
+  },
+  {
+    "stage": "implement",
+    "decision": "T2 implemented: 3 files changed (attempt 3)",
+    "rationale": "This looks fine and unaffected. Other test files (CodeGeneratorTest, ShortenRateLimitFilterTest, UrlMappingRepositoryTest, ActuatorHealthTest) are unit/repository level and unrelated to this bug.\n\nThe fix is complete: the sole failing test (`redirectFollowsToOriginalUrlAndIncrementsClicks`) was failing because the `TestRestTemplate` constructed via `new TestRestTemplate(new HttpClientOption[0])` was silently following the 302 redirect to the external `example.com` URL, and that request returned ",
+    "alternatives": [],
+    "commit_sha": null,
+    "trace_id": null,
+    "at": "2026-07-28T03:28:37.966456+00:00"
+  }
+]

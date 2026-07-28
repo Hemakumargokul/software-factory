@@ -1,30 +1,31 @@
-        run 699b3ec3 — safe_stopped        
+           run 498f963c — killed           
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
 ┃ metric                     ┃      value ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
 │ scenario                   │ greenfield │
-│ end-to-end latency         │   1328.42s │
-│ verification success rate  │     75.00% │
-│ first-attempt success rate │     75.00% │
-│ retries                    │          4 │
-│ rollbacks                  │          2 │
-│ MTTR                       │          - │
+│ end-to-end latency         │   1295.86s │
+│ verification success rate  │     78.57% │
+│ first-attempt success rate │     71.43% │
+│ retries                    │          3 │
+│ rollbacks                  │          0 │
+│ MTTR                       │    209.81s │
 │ unresolved failures        │          1 │
-│ agent cost                 │      $3.08 │
+│ agent cost                 │      $4.41 │
 └────────────────────────────┴────────────┘
-     per-stage time      
-┏━━━━━━━━━━━━━━┳━━━━━━━━┓
-┃ stage        ┃  total ┃
-┡━━━━━━━━━━━━━━╇━━━━━━━━┩
-│ implement    │ 651.3s │
-│ acceptance   │ 378.9s │
-│ review       │ 138.0s │
-│ design       │  54.9s │
-│ tests        │  54.4s │
-│ decompose    │  47.3s │
-│ requirements │  36.9s │
-│ intake       │  19.4s │
-│ policy       │   1.2s │
-│ rollback     │   0.2s │
-│ bootstrap    │   0.2s │
-└──────────────┴────────┘
+      per-stage time      
+┏━━━━━━━━━━━━━━┳━━━━━━━━━┓
+┃ stage        ┃   total ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━┩
+│ implement    │ 1007.1s │
+│ review       │  121.0s │
+│ design       │   51.6s │
+│ tests        │   49.9s │
+│ requirements │   42.3s │
+│ intake       │   30.8s │
+│ decompose    │   23.8s │
+│ acceptance   │   13.8s │
+│ policy       │    1.0s │
+│ bootstrap    │    0.2s │
+│ commit       │    0.1s │
+│ integrate    │    0.1s │
+└──────────────┴─────────┘

@@ -1,0 +1,398 @@
+{
+  "spec": {
+    "summary": "This specification defines a greenfield Spring Boot web service implementing a URL shortener with a fixed HTTP contract: creating/retrieving short codes for absolute http/https URLs via POST /api/shorten with deduplication and validation, redirecting via GET /{code}, exposing click statistics via GET /api/stats/{code}, enforcing a hand-rolled per-IP rate limit of 30 requests/second on the shorten endpoint, persisting all mappings and click counts in an embedded H2 database, and exposing a functioning Spring Actuator health endpoint. All ambiguous implementation choices (code format, redirect status code, error body shape, dedup semantics, IP extraction, H2 storage mode) are resolved with concrete, deterministic decisions below so the contract is fully testable black-box.",
+    "functional_requirements": [
+      "FR1: POST /api/shorten accepts a JSON body {\"url\": \"<string>\"} and, for a valid absolute http:// or https:// URL never seen before, creates a new mapping, persists it in H2, and returns HTTP 201 with JSON body {\"code\": \"<code>\", \"url\": \"<original url>\"}.",
+      "FR2: POST /api/shorten with a url value exactly matching (case-sensitive, unnormalized string equality) a previously shortened URL returns HTTP 200 with the same {\"code\", \"url\"} JSON body and does NOT create a duplicate mapping or a new code.",
+      "FR3: POST /api/shorten returns HTTP 400 with a JSON error body {\"error\": \"<message>\"} when: the url field is missing, url is not valid JSON/not a string, the URL fails standard URI syntax parsing, or the URL scheme is anything other than http or https (including javascript:, data:, ftp:, or no scheme).",
+      "FR4: Generated short codes are unique, non-empty, URL-safe strings (implementation: base62 alphabet [0-9A-Za-z], fixed length of 7 characters, derived from an internal counter or random generation with collision avoidance) and are returned identically on every subsequent lookup/dedup for that URL.",
+      "FR5: GET /{code} for a code that exists in the mapping store returns HTTP 302 (Found) with a Location header set to the exact original URL string that was shortened, and increments that code's click count by exactly 1 per request, persisted to H2.",
+      "FR6: GET /{code} for a code that does not exist in the mapping store returns HTTP 404 with a JSON error body {\"error\": \"<message>\"} and does not affect any click count.",
+      "FR7: GET /api/stats/{code} for an existing code returns HTTP 200 with JSON body {\"code\": \"<code>\", \"url\": \"<original url>\", \"clicks\": <integer>} reflecting the current persisted click count.",
+      "FR8: GET /api/stats/{code} for an unknown code returns HTTP 404 with a JSON error body {\"error\": \"<message>\"} and does not create any record.",
+      "FR9: GET /api/stats/{code} never increments the click count for that code, regardless of how many times it is called.",
+      "FR10: A hand-rolled (no external rate-limiting library) per-client-IP rate limiter enforces a maximum of 30 accepted requests per rolling or fixed 1-second window on POST /api/shorten only; the 31st and subsequent request from the same IP within the active window returns HTTP 429 with a JSON error body {\"error\": \"<message>\"}, and does not create a mapping or increment any counter.",
+      "FR11: The rate limiter identifies the client IP using the servlet request's remote address (HttpServletRequest.getRemoteAddr()); X-Forwarded-For and other proxy headers are not consulted (single-instance, direct-connection deployment assumption).",
+      "FR12: Rate limiting applies only to POST /api/shorten; GET /{code}, GET /api/stats/{code}, and GET /actuator/health are never rate-limited by this limiter.",
+      "FR13: All URL mappings (code -> original URL) and per-code click counts are persisted in an embedded H2 database via Spring Data JPA/JDBC such that stats and redirects reflect data written by prior requests within the same running application instance.",
+      "FR14: GET /actuator/health returns HTTP 200 with a JSON body containing at minimum {\"status\": \"UP\"} when the application and its H2 datasource are healthy.",
+      "FR15: The service accepts requests with a JSON Content-Type on POST /api/shorten and returns application/json response bodies on all API endpoints (/api/shorten, /api/stats/{code}, error responses)."
+    ],
+    "non_functional_requirements": [
+      "NFR1: The service starts as a self-contained Spring Boot application on a configurable port (default 8080) with no manual setup beyond a normal `./mvnw` or `./gradlew` bootRun/jar launch \u2014 no external database server required (H2 is embedded, in-memory mode by default, data reset acceptable on restart).",
+      "NFR2: The rate limiter must not use any third-party rate-limiting library (e.g., Bucket4j, Resilience4j) \u2014 only hand-written counters/timers using standard Java concurrency primitives (e.g., ConcurrentHashMap, AtomicInteger, scheduled resets) are permitted, and it must remain correct under concurrent requests from multiple IPs and threads (no lost updates or race conditions causing over/under-counting beyond a small, documented tolerance).",
+      "NFR3: Click count increments (FR5) must be safe under concurrent GET /{code} requests for the same code \u2014 no lost updates even when many requests for the same code arrive simultaneously.",
+      "NFR4: All endpoints must respond within 500ms under normal single-instance load (no external network calls), excluding first-request JVM/JIT warmup.",
+      "NFR5: The service must be a single deployable instance (no distributed rate-limit or shared-state requirement); horizontal scaling with correct rate limiting is explicitly out of scope.",
+      "NFR6: Error response bodies (400/404/429) must consistently use the JSON shape {\"error\": \"<string>\"} with Content-Type application/json across all endpoints.",
+      "NFR7: The codebase must be buildable and runnable via a standard build tool (Maven or Gradle) producing a single executable JAR with an embedded servlet container (no separate app-server deployment)."
+    ],
+    "acceptance_criteria": [
+      "AC1: Given no prior state, when POST /api/shorten is sent with body {\"url\": \"https://example.com/page\"}, then the response is HTTP 201 with JSON body containing non-empty string fields \"code\" and \"url\" where url equals \"https://example.com/page\".",
+      "AC2: Given a URL was already shortened via AC1 producing code X, when POST /api/shorten is sent again with the identical body {\"url\": \"https://example.com/page\"}, then the response is HTTP 200 or 201 with JSON \"code\" equal to X and \"url\" equal to \"https://example.com/page\".",
+      "AC3: When POST /api/shorten is sent with body {\"url\": \"javascript:alert(1)\"}, then the response is HTTP 400 with a JSON body containing an \"error\" field.",
+      "AC4: When POST /api/shorten is sent with body {\"url\": \"data:text/plain,hello\"}, then the response is HTTP 400 with a JSON body containing an \"error\" field.",
+      "AC5: When POST /api/shorten is sent with body {\"url\": \"ftp://example.com/file\"}, then the response is HTTP 400 with a JSON body containing an \"error\" field.",
+      "AC6: When POST /api/shorten is sent with body {\"url\": \"not a valid url\"}, then the response is HTTP 400 with a JSON body containing an \"error\" field.",
+      "AC7: When POST /api/shorten is sent with an empty JSON body {} (no url field), then the response is HTTP 400 with a JSON body containing an \"error\" field.",
+      "AC8: Given a shortened URL with code X pointing to https://example.com/page, when GET /X is issued, then the response is HTTP 301 or 302 with a Location header exactly equal to \"https://example.com/page\".",
+      "AC9: When GET /{code} is issued for a code that was never returned by any prior POST /api/shorten call, then the response is HTTP 404.",
+      "AC10: Given code X has never been visited via GET /X, when GET /api/stats/X is issued, then the response is HTTP 200 with JSON {\"code\": \"X\", \"url\": \"<original>\", \"clicks\": 0}.",
+      "AC11: Given code X has been visited via GET /X exactly 3 times, when GET /api/stats/X is issued, then the response is HTTP 200 with JSON field \"clicks\" equal to 3.",
+      "AC12: Given code X exists, when GET /api/stats/X is called 5 times in a row without any GET /X calls in between, then each call returns \"clicks\" unchanged (i.e., stats reads do not increment the counter).",
+      "AC13: When GET /api/stats/{code} is issued for an unknown code, then the response is HTTP 404.",
+      "AC14: Given a single client IP sends 30 POST /api/shorten requests within the same 1-second window each with a distinct new URL, then all 30 responses are HTTP 201 (not 429).",
+      "AC15: Given the same client IP has already made 30 accepted POST /api/shorten requests within the current 1-second window, when a 31st POST /api/shorten request is sent from that same IP within that window, then the response is HTTP 429 with a JSON body containing an \"error\" field.",
+      "AC16: Given client IP A has exhausted its 30-request budget in the current window (per AC15), when client IP B (different remote address) sends a POST /api/shorten request in the same window, then IP B's request succeeds with HTTP 201/200 (not 429), demonstrating per-IP isolation.",
+      "AC17: Given a request from an IP was rate-limited (HTTP 429) in one 1-second window, when that same IP retries after the window has elapsed (e.g., waiting >1 second), then the request is accepted (HTTP 201/200), demonstrating the limiter resets over time.",
+      "AC18: When GET /actuator/health is issued while the application is running normally, then the response is HTTP 200 with a JSON body whose \"status\" field equals \"UP\".",
+      "AC19: Given a mapping and its click count were created/incremented via prior POST/GET calls, when the application process is restarted with H2 configured in file-based persistent mode, then GET /api/stats/{code} for that code still returns the same url and clicks values as before restart (only applicable if file-based H2 mode is selected per NFR1/assumption; if in-memory mode is used, this criterion is not applicable and data reset on restart is acceptable instead).",
+      "AC20: Given 20 concurrent GET /{code} requests are issued simultaneously for the same existing code, when all requests complete, then GET /api/stats/{code} reports a clicks value that is exactly the pre-existing count plus 20 (no lost increments)."
+    ],
+    "out_of_scope": [
+      "Authentication, authorization, or API key requirements on any endpoint",
+      "URL expiration, TTL, deletion, or update of existing short code mappings",
+      "URL normalization for deduplication (trailing slashes, query parameter reordering, case-insensitive host comparison, default port stripping)",
+      "Distributed or multi-instance rate limiting; the limiter is explicitly single-node/in-memory only",
+      "Proxy-aware client IP resolution (X-Forwarded-For, X-Real-IP, or similar headers)",
+      "SSRF protection, blocklisting of internal/private IP ranges, or DNS resolution/reachability validation of shortened URLs",
+      "Custom/vanity short code selection by the client",
+      "Analytics beyond raw click counts (e.g., referrer tracking, geolocation, timestamps of individual clicks)",
+      "Horizontal scaling, load balancing, or multi-node deployment topologies",
+      "HTTPS/TLS termination configuration for the service itself",
+      "Admin UI, dashboard, or bulk management endpoints for shortened URLs",
+      "Internationalized domain name (IDN) or punycode-specific validation edge cases beyond standard Java URI parsing"
+    ]
+  },
+  "design": {
+    "architecture": "Single Spring Boot 3 (Java 21) deployable on the existing Maven-wrapper scaffold, listening on port 8188 as pinned in application.properties. Layered design: a thin Web layer (three @RestController classes) receives HTTP requests; a Filter (ShortenRateLimitFilter, registered only for POST /api/shorten via a path check inside doFilter) enforces the hand-rolled rate limit before the request reaches the controller; a Service layer (UrlShortenerService) implements validation, dedup lookup, code generation, click increment, and stats retrieval, all wrapped in @Transactional boundaries; a Repository layer (Spring Data JPA, UrlMappingRepository extends JpaRepository) persists to an embedded H2 database configured in file-based (or in-memory, decided below) mode declared in application.properties. Data flow: POST /api/shorten -> filter checks per-IP counter -> controller parses/validates JSON -> service checks repository for existing row by exact original_url match (indexed unique column) -> if found return 200 with existing code, else generate base62 7-char code via an internal atomic counter seeded from a DB sequence/table (avoiding collisions), persist new row, return 201. GET /{code} -> controller -> service loads row by code (indexed PK/unique column) -> if present, issue HTTP 302 with Location header set to stored raw URL string and increment click_count in the same transaction; if absent, 404 JSON error. GET /api/stats/{code} -> read-only lookup, no mutation. Actuator's health endpoint is auto-configured by spring-boot-starter-actuator and untouched by the rate limiter or custom filters. H2 console/driver only used as the embedded persistence engine, no other dependency added beyond the pre-approved starter set (web, actuator, h2, spring-boot-starter-data-jpa which is implied/needed for JPA \u2014 treated as part of the approved persistence layer since H2 was pre-approved and JPA is the idiomatic Spring Boot access pattern for it).",
+    "components": [
+      {
+        "name": "ShortenRateLimitFilter",
+        "responsibility": "Servlet Filter registered for pattern /api/shorten, POST only; maintains a ConcurrentHashMap<String, WindowCounter> keyed by request.getRemoteAddr(); implements a fixed 1-second window counter (reset via System.currentTimeMillis() bucket comparison) capped at 30 accepted requests; on the 31st+ request in the active window, writes HTTP 429 with JSON {\"error\":...} directly and halts the filter chain without invoking downstream layers; periodically evicts stale IP entries to bound memory."
+      },
+      {
+        "name": "ShortenController",
+        "responsibility": "Handles POST /api/shorten: deserializes request body into a DTO, delegates validation+creation/dedup to UrlShortenerService, maps results to 201/200/400 responses."
+      },
+      {
+        "name": "RedirectController",
+        "responsibility": "Handles GET /{code}: delegates lookup+increment to UrlShortenerService, returns 302 with Location header or 404 JSON error."
+      },
+      {
+        "name": "StatsController",
+        "responsibility": "Handles GET /api/stats/{code}: delegates read-only lookup to UrlShortenerService, returns 200 with stats JSON or 404 JSON error."
+      },
+      {
+        "name": "UrlShortenerService",
+        "responsibility": "Core business logic: URL syntax/scheme validation (java.net.URI, no external validator lib), exact-string dedup lookup, base62 code generation with collision-avoidance retry loop, transactional click increment, stats retrieval. All methods @Transactional to guarantee consistency between read-check and write."
+      },
+      {
+        "name": "CodeGenerator",
+        "responsibility": "Generates 7-character base62 [0-9A-Za-z] codes; strategy: draw from a monotonic counter (backed by a dedicated H2 sequence/table row updated atomically) encoded to base62, or SecureRandom fallback with a repository existence check + bounded retry loop to avoid collisions; guarantees uniqueness under concurrent requests via the repository's unique constraint on the code column plus DataIntegrityViolationException-triggered retry."
+      },
+      {
+        "name": "UrlMappingRepository",
+        "responsibility": "Spring Data JPA repository over UrlMapping entity; provides findByCode, findByOriginalUrl (indexed/unique lookups), and the standard save/incrementClicks operations."
+      },
+      {
+        "name": "UrlMapping (JPA Entity)",
+        "responsibility": "Persisted row: id, code (unique, indexed), original_url (unique, indexed, exact string stored as-is, no normalization), click_count, created_at."
+      },
+      {
+        "name": "GlobalExceptionHandler (@ControllerAdvice)",
+        "responsibility": "Centralizes malformed-JSON / missing-field / URI-parse failures into the uniform {\"error\": \"<message>\"} 400 response shape, keeping controller code free of repetitive try/catch."
+      },
+      {
+        "name": "Actuator (auto-configured)",
+        "responsibility": "Exposes GET /actuator/health with default UP status via spring-boot-starter-actuator, unmodified aside from default property exposure."
+      },
+      {
+        "name": "application.properties",
+        "responsibility": "Pins server.port=8188 (unchanged), configures embedded H2 datasource URL/mode, JPA ddl-auto, and disables/limits actuator endpoint exposure to health only if desired."
+      }
+    ],
+    "api_contract": [
+      {
+        "method": "POST",
+        "path": "/api/shorten",
+        "request": "{\"url\": \"<absolute http/https URL string>\"}",
+        "response": "201: {\"code\":\"<7-char base62>\",\"url\":\"<original url>\"} for new mapping; 200: same shape for exact-string dedup match; 400: {\"error\":\"<message>\"}; 429: {\"error\":\"<message>\"}",
+        "status_codes": [
+          200,
+          201,
+          400,
+          429
+        ]
+      },
+      {
+        "method": "GET",
+        "path": "/{code}",
+        "request": "path variable code",
+        "response": "302 with Location header = original URL (no body required); 404: {\"error\":\"<message>\"}",
+        "status_codes": [
+          302,
+          404
+        ]
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats/{code}",
+        "request": "path variable code",
+        "response": "200: {\"code\":\"<code>\",\"url\":\"<original url>\",\"clicks\":<integer>}; 404: {\"error\":\"<message>\"}",
+        "status_codes": [
+          200,
+          404
+        ]
+      },
+      {
+        "method": "GET",
+        "path": "/actuator/health",
+        "request": "none",
+        "response": "200: {\"status\":\"UP\"}",
+        "status_codes": [
+          200
+        ]
+      }
+    ],
+    "data_model": [
+      {
+        "entity": "UrlMapping",
+        "fields": [
+          "id: Long (PK, auto-generated)",
+          "code: String (unique, indexed, length 7)",
+          "originalUrl: String (unique, indexed, exact stored string, length up to e.g. 2048)",
+          "clickCount: long (default 0)",
+          "createdAt: Instant (default now)"
+        ]
+      }
+    ],
+    "alternatives_considered": [
+      "Bucket4j or Resilience4j for rate limiting \u2014 rejected: spec mandates hand-rolled limiter and adding either library is an unapproved governance event.",
+      "Redis or external cache for rate-limit counters/dedup lookup \u2014 rejected: constraint requires single deployable service with embedded database only; in-process ConcurrentHashMap suffices for single-instance assumption (FR11).",
+      "Random UUID-based codes truncated \u2014 rejected in favor of base62 counter/random hybrid: UUID substrings are not guaranteed collision-free and don't cleanly map to a fixed 7-char base62 alphabet requirement (FR4).",
+      "Sliding-log or token-bucket rate limiter \u2014 considered for precision but rejected in favor of simple fixed 1-second window counter per IP for implementation simplicity and to match 'fixed 1-second window' allowance in FR10 explicitly.",
+      "Storing URL normalized/lowercased for dedup \u2014 rejected: FR2 explicitly mandates case-sensitive, unnormalized exact string equality.",
+      "Using X-Forwarded-For for IP extraction \u2014 rejected: FR11 explicitly mandates HttpServletRequest.getRemoteAddr() only.",
+      "In-memory-only H2 (no persistence across restarts) vs file-based H2 \u2014 chose file-based (e.g., jdbc:h2:file:./data/urlshortener) to satisfy 'persisted' language robustly across restarts within constraints; in-memory mode remains an acceptable simpler alternative if test harness expects fresh state per run, but file-based better matches FR13's persistence intent and is still 'embedded database only'.",
+      "Adding spring-boot-starter-validation for request validation annotations \u2014 rejected: manual validation via java.net.URI and plain Java conditionals avoids introducing a new starter dependency, keeping within pre-approved set."
+    ],
+    "risks": [
+      {
+        "risk": "Race condition between dedup-check and insert under concurrent identical requests could create duplicate mappings for the same URL.",
+        "impact": "Violates FR2 uniqueness/dedup guarantee, could return different codes for the same URL across concurrent callers.",
+        "mitigation": "Enforce a unique DB constraint on original_url column; wrap check-then-insert in a single @Transactional method; catch DataIntegrityViolationException on insert race and re-query to return the winning row's code."
+      },
+      {
+        "risk": "Code generation collision under concurrent creation (two threads generate the same base62 code before either commits).",
+        "impact": "Unique constraint violation on code column, request failure or inconsistent response.",
+        "mitigation": "Unique constraint on code column plus a bounded retry loop in CodeGenerator that regenerates and retries the insert on DataIntegrityViolationException; prefer a monotonic counter (DB-backed sequence) over pure randomness to make collisions structurally impossible."
+      },
+      {
+        "risk": "In-process rate-limiter state (ConcurrentHashMap) grows unbounded with many distinct client IPs, or resets awkwardly on window boundaries causing burst admission just over 30/sec at window edges.",
+        "impact": "Memory growth over long uptime; minor allowance of slightly more than 30 req/sec at window boundary (fixed-window edge effect).",
+        "mitigation": "Periodically sweep/evict entries whose window timestamp is stale (e.g., on each request check age > 2s); document fixed-window edge-burst behavior as accepted per FR10's explicit allowance of 'fixed 1-second window' semantics."
+      },
+      {
+        "risk": "Single-instance-only rate limiter and H2 file store do not survive horizontal scaling or restarts correctly (state not shared/lost).",
+        "impact": "If deployed with multiple instances, rate limits and dedup would be inconsistent; a restart with in-memory H2 would lose all mappings.",
+        "mitigation": "Document as explicit single-instance deployment assumption (matches FR11's stated assumption); use file-based H2 storage mode so restarts within the same host preserve data, satisfying FR13 without adding infrastructure."
+      },
+      {
+        "risk": "Malformed JSON body or wrong content-type causes Spring's default exception handling to bypass the custom {\"error\":...} shape, leaking a default Spring error page/body.",
+        "impact": "FR3's contract for 400 error body shape would be violated for certain malformed inputs (e.g., non-JSON body, wrong Content-Type).",
+        "mitigation": "Add a @ControllerAdvice / @ExceptionHandler for HttpMessageNotReadableException and MethodArgumentNotValidException (if used) that maps all such failures to the standard 400 {\"error\": \"...\"} JSON shape."
+      },
+      {
+        "risk": "java.net.URI parsing is lenient and may accept strings that a stricter validator would reject, or reject valid edge-case URLs (e.g., IPv6 hosts, unusual encoding).",
+        "impact": "Inconsistent FR3 behavior at edge cases; test harness could flag over/under-permissive validation.",
+        "mitigation": "Explicitly validate scheme.equalsIgnoreCase('http'/'https') after URI parsing succeeds and require URI.isAbsolute(); add targeted unit tests for scheme-only rejection (javascript:, data:, ftp:, schemeless) to lock down documented behavior."
+      },
+      {
+        "risk": "Click-count increment and redirect are not atomic if implemented as separate read-then-write steps, risking lost updates under concurrent GET /{code} for the same code.",
+        "impact": "Undercounted clicks under concurrent load, violating FR5's 'exactly 1 per request' guarantee.",
+        "mitigation": "Use a single @Transactional service method performing an UPDATE ... SET click_count = click_count + 1 WHERE code = ? (JPQL/@Modifying query or native update) rather than load-increment-save, avoiding lost-update races."
+      },
+      {
+        "risk": "Actuator auto-exposes more endpoints/information than intended (env, beans, etc.) if management.endpoints.web.exposure.include is left at default or misconfigured.",
+        "impact": "Unintended information disclosure beyond the required health endpoint.",
+        "mitigation": "Explicitly set management.endpoints.web.exposure.include=health in application.properties, keeping the surface minimal while satisfying FR14."
+      },
+      {
+        "risk": "Long or malicious URLs (extremely large strings) submitted to /api/shorten could cause storage bloat or DB column truncation errors.",
+        "impact": "Unhandled exception on insert (data too long for column) surfacing as 500 instead of a controlled 400.",
+        "mitigation": "Define a generous but bounded column length (e.g., VARCHAR(2048)) and add an explicit length check in the service returning 400 {\"error\":...} before attempting persistence."
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Project skeleton, persistence layer, and code generation",
+      "description": "Set up the Spring Boot 3 (Java 21) Maven project using the existing wrapper scaffold. Configure application.properties: server.port=8188, embedded H2 datasource (file-based, e.g. jdbc:h2:file:./data/urlshortener), spring-boot-starter-web, spring-boot-starter-data-jpa, spring-boot-starter-actuator, h2 dependencies. Create the UrlMapping JPA entity (id, code [unique, indexed], original_url [unique, indexed, exact-match column], click_count) and UrlMappingRepository extends JpaRepository with findByCode and findByOriginalUrl query methods. Implement CodeGenerator producing 7-char base62 [0-9A-Za-z] codes via an atomic counter (backed by a DB sequence/counter table or AtomicLong seeded at startup from max existing id) with a bounded collision-retry loop against the repository's unique constraint. Add the main Spring Boot application class so the app builds and starts (with no functional endpoints yet beyond default actuator health, which is auto-configured). Write unit/integration tests: repository tests verifying unique constraints and lookup-by-code/original_url; CodeGenerator tests verifying length=7, base62 charset, uniqueness across many generations, and correct behavior under simulated collision retries. Verify GET /actuator/health returns 200 with status UP using a Spring Boot test context.",
+      "depends_on": [],
+      "verify": "mvn (or wrapper) build succeeds, application context loads in a Spring Boot test, all repository/CodeGenerator unit tests pass, and an integration test confirms GET /actuator/health returns HTTP 200 with body containing status UP.",
+      "status": "integrated"
+    },
+    {
+      "id": "T2",
+      "title": "Core shorten/redirect/stats business logic and REST controllers",
+      "description": "Implement UrlShortenerService (@Transactional) with: validateAndParse(url) using java.net.URI to enforce absolute http/https scheme only (rejecting missing scheme, javascript:, data:, ftp:, malformed syntax); shortenOrGet(url) performing exact-string dedup lookup via repository.findByOriginalUrl, returning existing (code, url, false=existing) or creating+persisting a new mapping via CodeGenerator (true=created); lookupAndIncrementClick(code) that atomically loads by code and increments click_count in the same transaction, returning Optional; getStats(code) read-only lookup with no mutation. Implement ShortenController (POST /api/shorten: parses JSON DTO {\"url\":...}, returns 201+{\"code\",\"url\"} for new, 200+{\"code\",\"url\"} for dedup, 400+{\"error\":...} for validation failures including malformed/non-string JSON body). Implement RedirectController (GET /{code}: 302 with Location header set to exact stored URL string on hit, increments click count; 404+{\"error\":...} on miss, no mutation). Implement StatsController (GET /api/stats/{code}: 200+{\"code\",\"url\",\"clicks\"} on hit; 404+{\"error\":...} on miss, never increments). Add a @ControllerAdvice or explicit error-body construction to guarantee consistent {\"error\": \"<message>\"} shape for all 400/404 responses. Write MockMvc/@SpringBootTest tests covering: create-then-201, exact dedup-then-200-no-duplicate-row, all FR3 validation-400 cases (missing url, non-string, malformed URI, non-http/https schemes including javascript/data/ftp/no-scheme), redirect-302-with-correct-Location-and-click-increment, redirect-404-for-unknown-code-no-count-effect, stats-200-with-correct-clicks, stats-404-for-unknown-code, and stats-never-increments-across-repeated-calls.",
+      "depends_on": [
+        "T1"
+      ],
+      "verify": "All new MockMvc/integration tests pass, covering every FR1-FR9 scenario listed; verify via H2-backed test context that no duplicate rows are created on dedup and click_count values match expected integers after repeated redirect/stats calls.",
+      "status": "pending"
+    },
+    {
+      "id": "T3",
+      "title": "Hand-rolled per-IP rate limiting for POST /api/shorten",
+      "description": "Implement ShortenRateLimitFilter as a javax/jakarta Servlet Filter registered (via FilterRegistrationBean or @Component + @Order) to intercept only POST requests matching /api/shorten. Maintain a ConcurrentHashMap<String, WindowCounter> keyed by request.getRemoteAddr() (no X-Forwarded-For lookup per FR11), implementing a fixed 1-second window counter capped at 30 accepted requests; requests 31+ within the active window short-circuit the chain and write HTTP 429 with JSON body {\"error\": \"<message>\"} directly, without invoking the controller/service (no mapping created, no counters touched). Ensure GET /{code}, GET /api/stats/{code}, and GET /actuator/health bypass this filter entirely (verify path/method matching excludes them). Add a lightweight eviction mechanism for stale IP entries to bound memory growth. Write unit tests for the filter in isolation (using mock HttpServletRequest/Response/FilterChain) verifying: requests 1-30 from same IP pass through within a window, request 31 within the same window returns 429 with correct JSON body and does not call the chain, counters reset after the window elapses, and different IPs are tracked independently. Write a @SpringBootTest/MockMvc integration test firing 31 rapid POSTs from a fixed remote address to confirm the 31st returns 429 and does not create a new mapping, plus a control test confirming GET /{code} and GET /actuator/health are unaffected even after exhausting the shorten rate limit.",
+      "depends_on": [
+        "T2"
+      ],
+      "verify": "Filter unit tests and the full integration test suite pass, specifically demonstrating the 30-requests-per-second-per-IP cap on POST /api/shorten with 429+JSON error on breach, no side effects on breach, and confirmed non-application of the limiter to redirect/stats/actuator endpoints.",
+      "status": "pending"
+    }
+  ],
+  "risks": [
+    {
+      "stage": "design",
+      "risk": "Race condition between dedup-check and insert under concurrent identical requests could create duplicate mappings for the same URL.",
+      "impact": "Violates FR2 uniqueness/dedup guarantee, could return different codes for the same URL across concurrent callers.",
+      "mitigation": "Enforce a unique DB constraint on original_url column; wrap check-then-insert in a single @Transactional method; catch DataIntegrityViolationException on insert race and re-query to return the winning row's code."
+    },
+    {
+      "stage": "design",
+      "risk": "Code generation collision under concurrent creation (two threads generate the same base62 code before either commits).",
+      "impact": "Unique constraint violation on code column, request failure or inconsistent response.",
+      "mitigation": "Unique constraint on code column plus a bounded retry loop in CodeGenerator that regenerates and retries the insert on DataIntegrityViolationException; prefer a monotonic counter (DB-backed sequence) over pure randomness to make collisions structurally impossible."
+    },
+    {
+      "stage": "design",
+      "risk": "In-process rate-limiter state (ConcurrentHashMap) grows unbounded with many distinct client IPs, or resets awkwardly on window boundaries causing burst admission just over 30/sec at window edges.",
+      "impact": "Memory growth over long uptime; minor allowance of slightly more than 30 req/sec at window boundary (fixed-window edge effect).",
+      "mitigation": "Periodically sweep/evict entries whose window timestamp is stale (e.g., on each request check age > 2s); document fixed-window edge-burst behavior as accepted per FR10's explicit allowance of 'fixed 1-second window' semantics."
+    },
+    {
+      "stage": "design",
+      "risk": "Single-instance-only rate limiter and H2 file store do not survive horizontal scaling or restarts correctly (state not shared/lost).",
+      "impact": "If deployed with multiple instances, rate limits and dedup would be inconsistent; a restart with in-memory H2 would lose all mappings.",
+      "mitigation": "Document as explicit single-instance deployment assumption (matches FR11's stated assumption); use file-based H2 storage mode so restarts within the same host preserve data, satisfying FR13 without adding infrastructure."
+    },
+    {
+      "stage": "design",
+      "risk": "Malformed JSON body or wrong content-type causes Spring's default exception handling to bypass the custom {\"error\":...} shape, leaking a default Spring error page/body.",
+      "impact": "FR3's contract for 400 error body shape would be violated for certain malformed inputs (e.g., non-JSON body, wrong Content-Type).",
+      "mitigation": "Add a @ControllerAdvice / @ExceptionHandler for HttpMessageNotReadableException and MethodArgumentNotValidException (if used) that maps all such failures to the standard 400 {\"error\": \"...\"} JSON shape."
+    },
+    {
+      "stage": "design",
+      "risk": "java.net.URI parsing is lenient and may accept strings that a stricter validator would reject, or reject valid edge-case URLs (e.g., IPv6 hosts, unusual encoding).",
+      "impact": "Inconsistent FR3 behavior at edge cases; test harness could flag over/under-permissive validation.",
+      "mitigation": "Explicitly validate scheme.equalsIgnoreCase('http'/'https') after URI parsing succeeds and require URI.isAbsolute(); add targeted unit tests for scheme-only rejection (javascript:, data:, ftp:, schemeless) to lock down documented behavior."
+    },
+    {
+      "stage": "design",
+      "risk": "Click-count increment and redirect are not atomic if implemented as separate read-then-write steps, risking lost updates under concurrent GET /{code} for the same code.",
+      "impact": "Undercounted clicks under concurrent load, violating FR5's 'exactly 1 per request' guarantee.",
+      "mitigation": "Use a single @Transactional service method performing an UPDATE ... SET click_count = click_count + 1 WHERE code = ? (JPQL/@Modifying query or native update) rather than load-increment-save, avoiding lost-update races."
+    },
+    {
+      "stage": "design",
+      "risk": "Actuator auto-exposes more endpoints/information than intended (env, beans, etc.) if management.endpoints.web.exposure.include is left at default or misconfigured.",
+      "impact": "Unintended information disclosure beyond the required health endpoint.",
+      "mitigation": "Explicitly set management.endpoints.web.exposure.include=health in application.properties, keeping the surface minimal while satisfying FR14."
+    },
+    {
+      "stage": "design",
+      "risk": "Long or malicious URLs (extremely large strings) submitted to /api/shorten could cause storage bloat or DB column truncation errors.",
+      "impact": "Unhandled exception on insert (data too long for column) surfacing as 500 instead of a controlled 400.",
+      "mitigation": "Define a generous but bounded column length (e.g., VARCHAR(2048)) and add an explicit length check in the service returning 400 {\"error\":...} before attempting persistence."
+    },
+    {
+      "stage": "review",
+      "task": "T1",
+      "risk": "Counter seeding via findAll() loading all rows into memory at startup",
+      "impact": "Startup time and memory usage degrade linearly with table size; could cause slow or failing startup once the table grows large.",
+      "mitigation": "Replace with a lightweight aggregate query (COUNT/MAX via @Query) or a dedicated sequence/counter table as the design suggests."
+    },
+    {
+      "stage": "review",
+      "task": "T1",
+      "risk": "Code space exhaustion truncation logic in CodeGenerator.encode",
+      "impact": "After 62^7 (~3.5T) codes, encode() truncates and could produce colliding/non-unique codes, relying entirely on the retry+unique-constraint fallback under sustained collision pressure.",
+      "mitigation": "Add explicit monitoring/alerting or a hard failure mode instead of silent truncation; unlikely to be hit in practice but should be a known limitation."
+    },
+    {
+      "stage": "review",
+      "task": "T1",
+      "risk": "Schema managed by Hibernate ddl-auto=update rather than versioned migrations",
+      "impact": "Schema drift or unexpected auto-migrations in production-like environments could cause data issues that are hard to diagnose or roll back.",
+      "mitigation": "Consider Flyway/Liquibase or a checked-in schema.sql in a follow-up task if the project moves beyond skeleton stage."
+    },
+    {
+      "stage": "review",
+      "task": "T1",
+      "risk": "Full-table scan in @PostConstruct seedCounter() on every application startup",
+      "impact": "Startup latency grows linearly with table size; could become slow or memory-heavy after sustained production use",
+      "mitigation": "Replace with a MAX(id) aggregate query or dedicated counter/sequence table read"
+    },
+    {
+      "stage": "review",
+      "task": "T1",
+      "risk": "Per-call repository existence check in nextCode() adds unnecessary DB latency to the write path",
+      "impact": "Every shorten request pays for an extra SELECT even though collisions are astronomically rare with the atomic counter",
+      "mitigation": "Rely on the unique constraint + catch DataIntegrityViolationException on save, retry only on actual collision"
+    },
+    {
+      "stage": "review",
+      "task": "T1",
+      "risk": "Counter is JVM-local, not distributed",
+      "impact": "If deployment ever moves to multiple instances, concurrent code generation could collide across instances despite the unique constraint catching it at save-time",
+      "mitigation": "Unique constraint + retry-on-save already provides a safety net; document as known single-instance assumption"
+    },
+    {
+      "stage": "review",
+      "task": "T2",
+      "risk": "The diff appears incomplete relative to the T2 task scope (test-only, no controllers/services/filter shown)",
+      "impact": "Reviewers cannot fully assess correctness, and CI could pass tests against stale/prior production code, masking regressions",
+      "mitigation": "Confirm whether production code was already merged in a separate commit/PR and, if so, review that diff alongside this one before sign-off"
+    },
+    {
+      "stage": "review",
+      "task": "T2",
+      "risk": "Rate limiter and code-generation concurrency behavior are untested",
+      "impact": "Race conditions or off-by-one errors in the 30-request window or code collision handling could surface only in production under load",
+      "mitigation": "Add dedicated unit/integration tests for ShortenRateLimitFilter windowing and CodeGenerator concurrent uniqueness before final release"
+    },
+    {
+      "stage": "review",
+      "task": "T2",
+      "risk": "Shared H2 instance across @SpringBootTest methods without explicit isolation strategy",
+      "impact": "Flaky tests or false negatives/positives if test execution order or parallelism changes",
+      "mitigation": "Add @Transactional/@DirtiesContext or a per-test data cleanup strategy, or confirm H2 is in-memory with fresh context per test run"
+    },
+    {
+      "stage": "review",
+      "task": "T2",
+      "risk": "Orphaned committed rows if outer transaction rolls back after createNew() succeeds via its inner REQUIRES_NEW transaction",
+      "impact": "Data inconsistency: a URL mapping could exist in the DB with no compensating outer-transaction success, e.g., if a later step in the same request throws after createNew() returns, the client sees an error response but the shortened URL is already live and resolvable via GET /{code}.",
+      "mitigation": "Verify that shorten() has no logic after createNew() that could fail and require rollback; if such logic exists or could be added later, either move createNew() to be the last operation in the transaction, or document/accept this as an intentional at-least-once creation semantic."
+    },
+    {
+      "stage": "review",
+      "task": "T2",
+      "risk": "Test bypasses Spring Boot's TestRestTemplate context customization by manually constructing the client",
+      "impact": "The test may lose base-URL prefixing, custom message converters, or auth configuration that other tests rely on being consistent; could mask real bugs or cause future flakiness that's hard to diagnose since the workaround wasn't root-caused.",
+      "mitigation": "Investigate why the autowired TestRestTemplate was following redirects (check application-test.properties or a TestRestTemplate customizer bean); prefer fixing the root cause over instantiating a bespoke client in one test class."
+    },
+    {
+      "stage": "review",
+      "task": "T2",
+      "risk": "Silent architectural deviation (manual transaction management) not reflected in the design document",
+      "impact": "Future maintainers or automated contract-conformance checks may be confused about why UrlShortenerService no longer relies purely on declarative @Transactional as the design specifies, increasing risk of regressions when the transactional boundaries are modified again.",
+      "mitigation": "Update the design doc/ADR to note this exception, or add a comment/test explicitly documenting the intended failure/consistency semantics for createNew()'s isolated transaction."
+    }
+  ]
+}
