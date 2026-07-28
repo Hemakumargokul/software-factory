@@ -8,14 +8,17 @@ guard, every tool attempt audited, the whole invocation traced.
 import time
 from pathlib import Path
 
-from factory import claude, gates, git_ops, tracing
-from factory.claude import (
+from factory import git_ops
+from factory.agent import claude
+from factory.governance import gates
+from factory.observability import tracing
+from factory.agent.claude import implementer_role
+from factory.agent.prompts import (
     FAILURE_CONTEXT_PROMPT,
     IMPLEMENT_TASK_PROMPT,
     IMPLEMENTER_SYSTEM_PROMPT,
-    implementer_role,
 )
-from factory.permissions import make_can_use_tool, make_pretooluse_hook
+from factory.agent.permissions import make_can_use_tool, make_pretooluse_hook
 from factory.profiles import get_profile
 from factory.stages.common import compact
 from factory.state import FactoryState, audit_event, metric_event, record_decision

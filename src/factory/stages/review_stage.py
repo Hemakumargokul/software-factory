@@ -12,8 +12,9 @@ blocking checks are the deterministic ones (tests, policy).
 import time
 from pathlib import Path
 
-from factory import git_ops, tracing
-from factory.claude import REVIEW_PROMPT
+from factory import git_ops
+from factory.observability import tracing
+from factory.agent.prompts import REVIEW_PROMPT
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event
 

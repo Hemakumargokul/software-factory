@@ -6,7 +6,7 @@ the stage (there may be no tests yet), from the second task on, tests gate.
 
 import time
 
-from factory import tracing
+from factory.observability import tracing
 from factory.profiles import get_profile
 from factory.state import FactoryState, metric_event
 

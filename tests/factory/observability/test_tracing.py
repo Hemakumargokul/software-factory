@@ -1,7 +1,7 @@
 import pytest
 
-from factory import tracing
-from factory.claude import RoleResult
+from factory.observability import tracing
+from factory.agent.claude import RoleResult
 
 
 @pytest.fixture(autouse=True)

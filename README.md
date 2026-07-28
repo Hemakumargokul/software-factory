@@ -129,10 +129,19 @@ summary, metrics, trace pointer) into `scenarios/artifacts/<name>/`.
 ## Layout
 
 ```
-src/factory/          orchestrator (never edits product code)
-templates/            product scaffolds seeded at bootstrap
-tests/factory/        orchestrator unit tests (SDK roles mocked)
-tests/acceptance/     black-box HTTP contract tests for the product
-scenarios/            the three assignment scenarios plus captured artifacts
-docs/                 design plan, implementation plan, deliverable docs
+src/factory/              orchestrator (never edits product code)
+  graph.py                the brain: nodes, routers, retry/rollback/budget logic
+  state.py                graph state, reducers, decision lineage
+  profiles.py             language-agnostic product profiles
+  git_ops.py              the safety net: commit, diff, reset, merge
+  cli.py                  run / approve / resume / status / metrics / kill
+  agent/                  the hands: SDK roles, prompts, permission guard
+  governance/             automated gates, policy scanners, kill switch
+  observability/          Langfuse tracing, reliability metrics
+  stages/                 one module per graph node
+templates/                product scaffolds seeded at bootstrap
+tests/factory/            orchestrator unit tests (SDK roles mocked)
+tests/acceptance/         black-box HTTP contract tests for the product
+scenarios/                the three assignment scenarios plus captured artifacts
+docs/                     architecture, testing approach, original plans
 ```

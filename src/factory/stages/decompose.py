@@ -7,8 +7,9 @@ rather than mid-run when a task waits on something that can never finish.
 import time
 from graphlib import CycleError, TopologicalSorter
 
-from factory import gates, tracing
-from factory.claude import DECOMPOSE_PROMPT, REPLAN_CONTEXT_PROMPT
+from factory.governance import gates
+from factory.observability import tracing
+from factory.agent.prompts import DECOMPOSE_PROMPT, REPLAN_CONTEXT_PROMPT
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event, record_decision
 

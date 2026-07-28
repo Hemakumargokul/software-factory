@@ -2,7 +2,7 @@
 
 import pytest
 
-from factory import control
+from factory.governance import control
 
 
 @pytest.fixture(autouse=True)

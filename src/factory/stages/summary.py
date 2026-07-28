@@ -8,8 +8,8 @@ recorded. Written to runs/<run_id>/summary.md for the deliverable.
 import time
 from pathlib import Path
 
-from factory import tracing
-from factory.claude import SUMMARY_PROMPT
+from factory.observability import tracing
+from factory.agent.prompts import SUMMARY_PROMPT
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event, record_decision
 

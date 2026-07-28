@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
-from factory.permissions import make_can_use_tool, make_pretooluse_hook
+from factory.agent.permissions import make_can_use_tool, make_pretooluse_hook
 
 PROTECTED = ["tests/acceptance/**"]
 

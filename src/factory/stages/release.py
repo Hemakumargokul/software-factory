@@ -6,7 +6,7 @@ task statuses, not prose.
 
 import time
 
-from factory import tracing
+from factory.observability import tracing
 from factory.state import FactoryState, metric_event, record_decision
 
 

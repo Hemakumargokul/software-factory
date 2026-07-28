@@ -22,9 +22,9 @@ from rich.panel import Panel
 
 from rich.table import Table
 
-from factory import control
-from factory import metrics as metrics_module
-from factory import tracing
+from factory.governance import control
+from factory.observability import metrics as metrics_module
+from factory.observability import tracing
 from factory.graph import build_graph
 from factory.state import spent_usd
 

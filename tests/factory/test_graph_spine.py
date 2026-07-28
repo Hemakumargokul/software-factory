@@ -6,7 +6,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from factory import git_ops, profiles
-from factory.gates import GateViolation, check_entry
+from factory.governance.gates import GateViolation, check_entry
 from factory.graph import (
     MAX_ATTEMPTS,
     build_graph,

@@ -9,7 +9,8 @@ spent. Whether the run re-plans or safe-stops is the router's call.
 import time
 from pathlib import Path
 
-from factory import git_ops, tracing
+from factory import git_ops
+from factory.observability import tracing
 from factory.state import FactoryState, metric_event, record_decision
 
 

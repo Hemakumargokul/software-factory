@@ -6,8 +6,8 @@ into the prompt as authoritative parts of the request.
 
 import time
 
-from factory import tracing
-from factory.claude import CLARIFICATIONS_PROMPT, INTAKE_PROMPT
+from factory.observability import tracing
+from factory.agent.prompts import CLARIFICATIONS_PROMPT, INTAKE_PROMPT
 from factory.stages.common import run_reasoner
 from factory.state import FactoryState, metric_event, record_decision
 

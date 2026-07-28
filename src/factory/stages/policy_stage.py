@@ -9,8 +9,9 @@ policy violations would just ask the agent to hide them better.
 import time
 from pathlib import Path
 
-from factory import git_ops, tracing
-from factory.policy_rules import scan_all, scan_external
+from factory import git_ops
+from factory.observability import tracing
+from factory.governance.policy_rules import scan_all, scan_external
 from factory.profiles import get_profile
 from factory.state import FactoryState, audit_event, metric_event
 

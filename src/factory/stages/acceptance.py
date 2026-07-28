@@ -19,7 +19,7 @@ from pathlib import Path
 
 import httpx
 
-from factory import tracing
+from factory.observability import tracing
 from factory.profiles import get_profile
 from factory.stages.common import run_command
 from factory.state import FactoryState, metric_event

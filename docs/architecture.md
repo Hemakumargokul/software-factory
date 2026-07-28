@@ -106,7 +106,7 @@ an LLM cannot fabricate; it is copied, never generated.
 
 ## Gates: two distinct mechanisms
 
-**Automated entry/exit gates** (`gates.py`) are predicates on state, checked
+**Automated entry/exit gates** (`governance/gates.py`) are predicates on state, checked
 mechanically. Example: `implement` cannot enter a task until every task it
 depends on is integrated — the decomposition's DAG is enforced, not
 decorative.
@@ -155,7 +155,7 @@ and revision are recorded as decisions; history is append-only.
 
 Three layers, all mechanical:
 
-1. **Permission callback** (`permissions.py`): the implementer's Write/Edit
+1. **Permission callback** (`agent/permissions.py`): the implementer's Write/Edit
    calls are decided one at a time — deny anything resolving outside the
    sandbox (`Path.resolve()`, so `../` and absolute paths fail alike) or
    matching a protected glob. Every decision lands in the audit trail and as
@@ -163,7 +163,7 @@ Three layers, all mechanical:
 2. **PreToolUse hook**: observation-only record of every tool attempt, even
    auto-allowed reads. Deliberately returns no permission decision — a hook
    allow would bypass the callback.
-3. **Policy stage** (`policy_rules.py`): post-hoc diff scanning — secret
+3. **Policy stage** (`governance/policy_rules.py`): post-hoc diff scanning — secret
    regexes (plus gitleaks when installed), dependency-allowlist enforcement
    on `pom.xml` changes, per-language forbidden constructs. Runs in the
    parallel verification fan-out.
@@ -184,7 +184,7 @@ Three layers, all mechanical:
 
 ## Observability
 
-`tracing.py` wraps Langfuse with one process-wide guard: keys present, not
+`observability/tracing.py` wraps Langfuse with one process-wide guard: keys present, not
 disabled, host answers a 1-second health probe — otherwise every helper is a
 no-op and a missing Langfuse can never break a run. Per run: a session groups
 all traces; stage spans mirror the graph; generation spans carry model,
@@ -193,7 +193,7 @@ implementer tool attempt (denials at WARNING level); reliability scores are
 attached at run end. `docker-compose.langfuse.yml` brings up the self-hosted
 stack with keys pre-seeded — zero UI setup.
 
-`metrics.py` persists every run's metric events to `runs/metrics.db` and
+`observability/metrics.py` persists every run's metric events to `runs/metrics.db` and
 computes success rate, first-attempt success rate, retries, rollbacks, MTTR
 (wall-clock from a failing verification to the next passing one, per stage)
 and end-to-end latency with a per-stage breakdown. `factory metrics [run_id]`

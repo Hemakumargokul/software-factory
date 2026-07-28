@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from claude_agent_sdk import ResultMessage
 
-from factory import claude
-from factory.claude import (
+from factory.agent import claude
+from factory.agent.claude import (
     JsonExtractionError,
     RoleConfig,
     RoleError,

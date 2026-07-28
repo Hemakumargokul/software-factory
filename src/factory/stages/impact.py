@@ -10,13 +10,10 @@ it cannot see.
 import time
 from pathlib import Path
 
-from factory import claude, tracing
-from factory.claude import (
-    ANALYST_SYSTEM_PROMPT,
-    IMPACT_PROMPT,
-    analyst_role,
-    extract_json,
-)
+from factory.agent import claude
+from factory.observability import tracing
+from factory.agent.claude import analyst_role, extract_json
+from factory.agent.prompts import ANALYST_SYSTEM_PROMPT, IMPACT_PROMPT
 from factory.stages.common import compact
 from factory.state import FactoryState, metric_event, record_decision
 

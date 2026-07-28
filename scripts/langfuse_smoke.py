@@ -27,8 +27,10 @@ from langgraph.types import Command
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from factory import claude, metrics, profiles, tracing  # noqa: E402
-from factory.claude import RoleResult  # noqa: E402
+from factory import profiles, tracing  # noqa: E402
+from factory.agent import claude
+from factory.observability import metrics
+from factory.agent.claude import RoleResult  # noqa: E402
 from factory.graph import build_graph  # noqa: E402
 from factory.profiles import ProjectProfile  # noqa: E402
 

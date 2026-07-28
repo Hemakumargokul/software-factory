@@ -2,8 +2,9 @@
 
 import time
 
-from factory import gates, tracing
-from factory.claude import DESIGN_PROMPT, REVISION_CONTEXT_PROMPT
+from factory.governance import gates
+from factory.observability import tracing
+from factory.agent.prompts import DESIGN_PROMPT, REVISION_CONTEXT_PROMPT
 from factory.profiles import get_profile
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event, record_decision

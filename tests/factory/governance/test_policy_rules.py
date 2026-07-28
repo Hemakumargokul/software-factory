@@ -2,8 +2,8 @@ import shutil
 
 import pytest
 
-from factory import policy_rules
-from factory.policy_rules import (
+from factory.governance import policy_rules
+from factory.governance.policy_rules import (
     scan_all,
     scan_dependencies,
     scan_external,

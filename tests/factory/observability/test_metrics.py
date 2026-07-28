@@ -3,7 +3,7 @@ over interleaved failures."""
 
 import pytest
 
-from factory import metrics
+from factory.observability import metrics
 
 
 def ev(at: str, kind: str, stage: str, **payload) -> dict:

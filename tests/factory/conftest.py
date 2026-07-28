@@ -11,8 +11,9 @@ import re
 import pytest
 from langgraph.types import Command
 
-from factory import claude, profiles
-from factory.claude import RoleResult
+from factory import profiles
+from factory.agent import claude
+from factory.agent.claude import RoleResult
 from factory.profiles import ProjectProfile
 
 CANNED = {

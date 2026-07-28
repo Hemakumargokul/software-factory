@@ -210,8 +210,8 @@ async def test_implementer_abort_becomes_failed_attempt_and_retries(
     """A RoleError from the implementer (max turns, stream crash) must feed
     the retry loop, not kill the run: attempt 1 aborts, attempt 2 succeeds,
     and the retry prompt names the abort."""
-    from factory import claude
-    from factory.claude import RoleError
+    from factory.agent import claude
+    from factory.agent.claude import RoleError
 
     real_fake = claude.run_role
     aborted = {"done": False}

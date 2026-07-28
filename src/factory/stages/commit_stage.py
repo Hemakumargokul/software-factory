@@ -4,7 +4,8 @@ correlating the commit to the run for the audit trail."""
 import time
 from pathlib import Path
 
-from factory import git_ops, tracing
+from factory import git_ops
+from factory.observability import tracing
 from factory.state import FactoryState, metric_event, record_decision
 
 

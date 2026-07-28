@@ -6,8 +6,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from factory import claude, tracing
-from factory.claude import JSON_ROLE_SYSTEM_PROMPT, extract_json, reasoner_role
+from factory.agent import claude
+from factory.observability import tracing
+from factory.agent.claude import extract_json, reasoner_role
+from factory.agent.prompts import JSON_ROLE_SYSTEM_PROMPT
 
 REPORT_TAIL_LINES = 100
 
