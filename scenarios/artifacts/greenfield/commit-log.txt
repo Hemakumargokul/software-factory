@@ -1,6 +1,14 @@
-*   e027de5 (HEAD -> factory/t2, main) factory: integrate T1
+*   133ac70 (HEAD -> main) factory: integrate T2
 |\  
-| * 4495186 (factory/t1) factory(T1): Project skeleton, persistence layer, and code generation
+| * bb9a02e (factory/t2) factory(T2): Hand-rolled per-IP rate limiter for POST /api/shorten and final end-to-end wiring
+|/  
+*   fdc0247 factory: integrate T1
+|\  
+| * 8c85591 (factory/t1) factory(T1): Project skeleton, persistence layer, and core shorten/redirect/stats logic
+|/  
+*   e027de5 factory: integrate T1
+|\  
+| * 4495186 factory(T1): Project skeleton, persistence layer, and code generation
 |/  
 * 6cf443a factory: scaffold from template java-springboot
 * 3c51d49 factory: initial commit

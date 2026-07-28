@@ -15,12 +15,12 @@
 │ hand (no new dependencies).                                                  │
 │ Persist URL mappings and click counts in the embedded H2 database. Keep the  │
 │ actuator health endpoint working at /actuator/health.                        │
-│ next:     ['tests', 'policy', 'review']                                      │
-│ task:     1/3                                                                │
-│ attempts: 3  replan_budget: 1                                                │
-│ spend:    $4.41 of $10.00 budget                                             │
+│ next:     ['summary']                                                        │
+│ task:     2/2                                                                │
+│ attempts: 0  replan_budget: 0                                                │
+│ spend:    $6.35 of $10.00 budget                                             │
 │ stages:   ['acceptance', 'bootstrap', 'clarify', 'commit', 'decompose',      │
 │ 'design', 'gate_design', 'gate_merge', 'gate_requirements', 'implement',     │
-│ 'intake', 'integrate', 'policy', 'requirements', 'review', 'tests']          │
-│ KILLED — factory kill 498f963c --clear to make it resumable                  │
+│ 'intake', 'integrate', 'policy', 'release', 'replan', 'requirements',        │
+│ 'review', 'tests']                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯

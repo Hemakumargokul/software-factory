@@ -7,9 +7,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Core business logic for the URL shortener: validation, dedup lookup, code
@@ -22,17 +20,10 @@ public class UrlShortenerService {
 
     private final UrlMappingRepository repository;
     private final CodeGenerator codeGenerator;
-    private final TransactionTemplate requiresNewTransactionTemplate;
 
-    public UrlShortenerService(
-            UrlMappingRepository repository,
-            CodeGenerator codeGenerator,
-            PlatformTransactionManager transactionManager) {
+    public UrlShortenerService(UrlMappingRepository repository, CodeGenerator codeGenerator) {
         this.repository = repository;
         this.codeGenerator = codeGenerator;
-        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
-        this.requiresNewTransactionTemplate.setPropagationBehavior(
-                org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -51,22 +42,12 @@ public class UrlShortenerService {
                 .orElseGet(() -> createNew(url));
     }
 
-    /**
-     * Attempts to create a new mapping, retrying with a fresh code on
-     * collision. Each insert attempt runs in its own {@code REQUIRES_NEW}
-     * transaction so that a constraint violation on one attempt only rolls
-     * back that attempt's tiny transaction, rather than poisoning the
-     * enclosing transaction (which would otherwise make the subsequent
-     * dedup-lookup/retry fail too, per the well-known Hibernate/Spring
-     * "transaction marked rollback-only after a persistence exception" rule).
-     */
     private ShortenResult createNew(String url) {
         DataIntegrityViolationException lastFailure = null;
         for (int attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS; attempt++) {
             String code = codeGenerator.nextCode();
             try {
-                UrlMapping saved = requiresNewTransactionTemplate.execute(
-                        status -> repository.saveAndFlush(new UrlMapping(code, url)));
+                UrlMapping saved = repository.saveAndFlush(new UrlMapping(code, url));
                 return new ShortenResult(saved.getCode(), saved.getOriginalUrl(), true);
             } catch (DataIntegrityViolationException e) {
                 // Concurrent request won the race for either this code or this

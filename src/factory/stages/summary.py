@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from factory.observability import tracing
+from factory.agent import claude
 from factory.agent.prompts import SUMMARY_PROMPT
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event, record_decision
@@ -26,9 +27,14 @@ async def summary(state: FactoryState) -> dict:
         metrics=compact(state.get("metric_events") or [], limit=4000),
     )
     with tracing.stage_span("summary"):
-        data, cost = await run_reasoner("summary", prompt)
-
-    markdown = data.get("summary_markdown", "")
+        try:
+            data, cost = await run_reasoner("summary", prompt)
+            markdown = data.get("summary_markdown", "")
+        except claude.JsonExtractionError as exc:
+            # The deliverable IS markdown; a model that answered with the
+            # document instead of the JSON wrapper still answered. Use the
+            # raw reply rather than failing the whole run at its last step.
+            markdown, cost = exc.raw, 0.0
     out_path = RUNS_DIR / state["run_id"] / "summary.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(markdown)

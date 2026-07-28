@@ -23,6 +23,14 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * window; the 31st+ gets an immediate HTTP 429 JSON error and the filter
  * chain is halted. Stale per-IP entries are evicted opportunistically so
  * memory doesn't grow unbounded across many distinct client IPs.</p>
+ *
+ * <p>Registered as a {@code @Component} so Spring Boot's servlet container
+ * auto-registers it as a filter for every request; path matching is done
+ * manually inside {@link #isRateLimited(HttpServletRequest)} so that only
+ * {@code POST /api/shorten} is ever subject to the limit (FR10/FR12) &mdash;
+ * {@code GET /{code}}, {@code GET /api/stats/{code}}, and
+ * {@code GET /actuator/health} always bypass this filter entirely,
+ * regardless of the state of any per-IP counter.</p>
  */
 @Component
 public class ShortenRateLimitFilter extends OncePerRequestFilter {
@@ -36,21 +44,28 @@ public class ShortenRateLimitFilter extends OncePerRequestFilter {
     private final Map<String, WindowCounter> counters = new ConcurrentHashMap<>();
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        // FR12: only POST /api/shorten is ever subject to rate limiting. Every
+        // other request -- including GET /{code}, GET /api/stats/{code}, and
+        // GET /actuator/health -- skips this filter's logic entirely and is
+        // never touched by the per-IP counters below.
+        return !isRateLimited(request);
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
 
-        if (isRateLimited(request)) {
-            String ip = request.getRemoteAddr();
-            long currentWindow = currentWindow();
-            WindowCounter counter = counters.computeIfAbsent(ip, k -> new WindowCounter(currentWindow));
+        String ip = request.getRemoteAddr();
+        long currentWindow = currentWindow();
+        WindowCounter counter = counters.computeIfAbsent(ip, k -> new WindowCounter(currentWindow));
 
-            if (!counter.tryAccept(currentWindow)) {
-                evictStale(currentWindow);
-                writeTooManyRequests(response);
-                return;
-            }
+        if (!counter.tryAccept(currentWindow)) {
             evictStale(currentWindow);
+            writeTooManyRequests(response);
+            return;
         }
+        evictStale(currentWindow);
 
         chain.doFilter(request, response);
     }
