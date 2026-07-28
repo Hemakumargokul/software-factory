@@ -3,15 +3,20 @@ package com.factory.app.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.factory.app.repository.ClickEventRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
 
 @SpringBootTest
 class UrlShortenerServiceTest {
 
     @Autowired
     private UrlShortenerService service;
+
+    @Autowired
+    private ClickEventRepository clickEventRepository;
 
     @Test
     void shortenCreatesNewMappingWithCreatedTrue() {
@@ -68,6 +73,29 @@ class UrlShortenerServiceTest {
 
         service.resolveAndRecordClick(created.code());
         assertThat(service.stats(created.code()).clicks()).isEqualTo(2L);
+    }
+
+    @Test
+    @Transactional
+    void resolveAndRecordClickPersistsClickEventInSameTransaction() {
+        String url = "https://example.com/click-event-test-" + System.nanoTime();
+        var created = service.shorten(url);
+
+        String resolved = service.resolveAndRecordClick(created.code());
+        assertThat(resolved).isEqualTo(url);
+
+        // Same transaction: both the click_count increment and the new
+        // ClickEvent row must already be visible without a commit.
+        assertThat(service.stats(created.code()).clicks()).isEqualTo(1L);
+
+        var events = clickEventRepository.countDailyClicksByCode(created.code());
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).getCount()).isEqualTo(1L);
+
+        service.resolveAndRecordClick(created.code());
+        assertThat(service.stats(created.code()).clicks()).isEqualTo(2L);
+        assertThat(clickEventRepository.countDailyClicksByCode(created.code()).get(0).getCount())
+                .isEqualTo(2L);
     }
 
     @Test
