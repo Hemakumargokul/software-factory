@@ -82,6 +82,51 @@ class ShortenRateLimitIntegrationTest {
     }
 
     /**
+     * FR6: {@link GlobalExceptionHandler} must never intercept or alter the
+     * rate limiter's own 429 response. The filter runs before
+     * DispatcherServlet and writes its raw {@code {"error": "..."}} body
+     * directly, so a 429 response must have exactly that shape -- no
+     * {@code status}/{@code message}/{@code path}/{@code timestamp} fields
+     * that the structured {@link com.factory.app.web.ErrorResponse} would
+     * add if this request had instead gone through the global advice.
+     */
+    @Test
+    void rateLimitResponseBodyRemainsRawAndUnstructuredByGlobalExceptionHandler() throws Exception {
+        MvcResult rejected = null;
+        for (int i = 0; i < 45 && rejected == null; i++) {
+            String url = "https://example.com/rate-limit-raw-shape-" + System.nanoTime();
+            MvcResult result = mockMvc.perform(post("/api/shorten")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                    .andReturn();
+            if (result.getResponse().getStatus() == 429) {
+                rejected = result;
+            }
+        }
+
+        org.assertj.core.api.Assertions.assertThat(rejected)
+                .as("expected to observe at least one 429 to assert its raw body shape")
+                .isNotNull();
+
+        org.assertj.core.api.Assertions.assertThat(rejected.getResponse().getContentType())
+                .contains("application/json");
+
+        var node = objectMapper.readTree(rejected.getResponse().getContentAsString());
+        org.assertj.core.api.Assertions.assertThat(node.has("error")).isTrue();
+        org.assertj.core.api.Assertions.assertThat(node.get("error").asText()).isNotBlank();
+
+        // The filter's raw body must be exactly the one-field shape it
+        // writes itself -- none of GlobalExceptionHandler/ErrorResponse's
+        // extra fields should be present, proving the advice never touched
+        // this response.
+        org.assertj.core.api.Assertions.assertThat(node.has("status")).isFalse();
+        org.assertj.core.api.Assertions.assertThat(node.has("message")).isFalse();
+        org.assertj.core.api.Assertions.assertThat(node.has("path")).isFalse();
+        org.assertj.core.api.Assertions.assertThat(node.has("timestamp")).isFalse();
+        org.assertj.core.api.Assertions.assertThat(node.size()).isEqualTo(1);
+    }
+
+    /**
      * FR12 sanity check: even after saturating the POST /api/shorten limit
      * for this client, GET /{code}, GET /api/stats/{code}, and
      * GET /actuator/health must remain fully functional and never return 429.
