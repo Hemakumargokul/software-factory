@@ -3,8 +3,13 @@
 bootstrap -> intake -> [clarify?] -> requirements -> GATE -> design -> GATE
   -> decompose -> implement -> {tests, policy, review}  (fan-out)
   -> sync (defer=True join)
-  -> acceptance -> commit -> MERGE GATE -> integrate
+  -> [acceptance: final task only] -> commit -> MERGE GATE -> integrate
   -> ... next task or release -> summary
+
+The black-box acceptance suite exams the ENTIRE contract, so it gates only
+the plan's final task; an honest mid-plan increment would always flunk it,
+and every acceptance failure buys another paid implementation attempt.
+Intermediate tasks are judged by build + unit tests + policy + review.
 
 Failure edges: sync/acceptance feed back to implement while attempts last;
 policy violations, exhausted retries and rejected merges roll back to
@@ -49,6 +54,13 @@ from factory.state import FactoryState, metric_event, record_decision, spent_usd
 
 MAX_ATTEMPTS = 3  # initial implementation plus two retries per task
 CLARIFY_THRESHOLD = 0.5  # intake ambiguity_score at/above this asks a human
+
+
+def is_final_task(state: FactoryState) -> bool:
+    """Is the task being verified the plan's last? Only that one faces the
+    black-box acceptance suite, which tests the entire contract."""
+    tasks = state.get("tasks") or []
+    return state.get("task_idx", 0) >= len(tasks) - 1
 
 
 def over_budget(state: FactoryState) -> bool:
@@ -190,7 +202,7 @@ def route_after_sync(state: FactoryState) -> str:
     implement_failed = (results.get("implement") or {}).get("status") == "fail"
     tests_passed = (results.get("tests") or {}).get("status") == "pass"
     if tests_passed and not implement_failed:
-        return "acceptance"
+        return "acceptance" if is_final_task(state) else "commit"
     if over_budget(state):
         return "safe_stop"
     if state.get("attempts", 0) < MAX_ATTEMPTS:
@@ -293,7 +305,7 @@ def build_graph(checkpointer=None):
 
     builder.add_conditional_edges(
         "sync", route_after_sync,
-        ["acceptance", "implement", "rollback", "safe_stop"],
+        ["acceptance", "commit", "implement", "rollback", "safe_stop"],
     )
     builder.add_conditional_edges(
         "acceptance", route_after_acceptance,

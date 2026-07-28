@@ -117,6 +117,12 @@ independently verifiable by building and running the test suite. Wire
 dependencies with depends_on (task ids). Every task includes writing its
 unit tests. The first task must produce a compilable application skeleton.
 
+How tasks are verified: intermediate tasks by compile + unit tests +
+review only; the FINAL task additionally by a black-box acceptance suite
+that exercises the ENTIRE specification against the running service. The
+last task must therefore leave every requirement of the specification
+implemented and working end to end.
+
 Reply with JSON:
 {
   "tasks": [

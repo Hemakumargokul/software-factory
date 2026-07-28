@@ -107,12 +107,23 @@ async def test_retry_rollback_replan_safestop(spine_env, gate_driver, monkeypatc
 
 
 class TestRouters:
-    def test_route_after_sync_pass_goes_to_acceptance(self):
+    def test_route_after_sync_pass_final_task_goes_to_acceptance(self):
         state = {"stage_results": {"tests": {"status": "pass"},
                                    "policy": {"status": "pass"},
                                    "review": {"status": "pass"}},
-                 "attempts": 1}
+                 "attempts": 1,
+                 "tasks": [{"id": "T1"}, {"id": "T2"}], "task_idx": 1}
         assert route_after_sync(state) == "acceptance"
+
+    def test_route_after_sync_pass_mid_plan_task_skips_acceptance(self):
+        # The black-box suite exams the whole contract; an honest increment
+        # would always flunk it, so mid-plan tasks commit on unit evidence.
+        state = {"stage_results": {"tests": {"status": "pass"},
+                                   "policy": {"status": "pass"},
+                                   "review": {"status": "pass"}},
+                 "attempts": 1,
+                 "tasks": [{"id": "T1"}, {"id": "T2"}], "task_idx": 0}
+        assert route_after_sync(state) == "commit"
 
     def test_route_after_sync_fail_retries_while_attempts_left(self):
         state = {"stage_results": {"tests": {"status": "fail"},

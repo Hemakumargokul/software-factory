@@ -58,6 +58,11 @@ EOF
         "/tmp/factory/$run_id/" "$dir/product/" || true
     git -C "/tmp/factory/$run_id" bundle create "$dir/product.bundle" --all \
         2>/dev/null || true
+    # Also keep the sandbox's integrated history as a branch of THIS repo
+    # (unrelated history, but it survives /tmp cleanup and is browsable):
+    #   git checkout product/<scenario>-<run_id>
+    git -C "$REPO_ROOT" fetch --force "/tmp/factory/$run_id" \
+        "main:product/$name-$run_id" 2>/dev/null || true
 
     echo "artifacts in scenarios/artifacts/$name/"
 }
