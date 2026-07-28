@@ -1,5 +1,6 @@
 package com.factory.app.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasLength;
 import static org.hamcrest.Matchers.not;
@@ -114,6 +115,30 @@ class ShortenControllerWebTest {
         mockMvc.perform(get("/api/stats/{code}", code))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.clicks", equalTo(1)));
+    }
+
+    @Test
+    void redirectContractUnchangedByClickEventPersistence() throws Exception {
+        // Regression test for the ClickEvent persistence change: the redirect
+        // endpoint's status code, headers, and (lack of) response body must
+        // be byte-for-byte identical to before that change.
+        String url = "https://example.com/redirect-contract-" + System.nanoTime();
+
+        MvcResult created = mockMvc.perform(post("/api/shorten")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String code = objectMapper.readTree(created.getResponse().getContentAsString()).get("code").asText();
+
+        MvcResult redirect = mockMvc.perform(get("/{code}", code))
+                .andExpect(status().is(302))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", url))
+                .andReturn();
+
+        assertThat(redirect.getResponse().getContentAsString()).isEmpty();
+        assertThat(redirect.getResponse().getContentType()).isNull();
     }
 
     @Test

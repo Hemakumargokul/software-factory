@@ -1,10 +1,13 @@
 package com.factory.app.service;
 
 import com.factory.app.codegen.CodeGenerator;
+import com.factory.app.domain.ClickEvent;
 import com.factory.app.domain.UrlMapping;
+import com.factory.app.repository.ClickEventRepository;
 import com.factory.app.repository.UrlMappingRepository;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Instant;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,10 +23,15 @@ public class UrlShortenerService {
 
     private final UrlMappingRepository repository;
     private final CodeGenerator codeGenerator;
+    private final ClickEventRepository clickEventRepository;
 
-    public UrlShortenerService(UrlMappingRepository repository, CodeGenerator codeGenerator) {
+    public UrlShortenerService(
+            UrlMappingRepository repository,
+            CodeGenerator codeGenerator,
+            ClickEventRepository clickEventRepository) {
         this.repository = repository;
         this.codeGenerator = codeGenerator;
+        this.clickEventRepository = clickEventRepository;
     }
 
     /**
@@ -75,6 +83,7 @@ public class UrlShortenerService {
                 .orElseThrow(() -> new CodeNotFoundException(code));
         mapping.incrementClickCount();
         repository.save(mapping);
+        clickEventRepository.save(new ClickEvent(mapping.getCode(), Instant.now()));
         return mapping.getOriginalUrl();
     }
 
