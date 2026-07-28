@@ -90,11 +90,11 @@ class UrlShortenerServiceTest {
 
         var events = clickEventRepository.countDailyClicksByCode(created.code());
         assertThat(events).hasSize(1);
-        assertThat(events.get(0).getCount()).isEqualTo(1L);
+        assertThat(events.get(0).getClickCount()).isEqualTo(1L);
 
         service.resolveAndRecordClick(created.code());
         assertThat(service.stats(created.code()).clicks()).isEqualTo(2L);
-        assertThat(clickEventRepository.countDailyClicksByCode(created.code()).get(0).getCount())
+        assertThat(clickEventRepository.countDailyClicksByCode(created.code()).get(0).getClickCount())
                 .isEqualTo(2L);
     }
 
@@ -119,5 +119,39 @@ class UrlShortenerServiceTest {
         service.stats(created.code());
 
         assertThat(service.stats(created.code()).clicks()).isZero();
+    }
+
+    @Test
+    void dailyStatsReturnsEmptyListForKnownCodeWithZeroClicks() {
+        String url = "https://example.com/daily-zero-" + System.nanoTime();
+        var created = service.shorten(url);
+
+        assertThat(service.dailyStats(created.code())).isEmpty();
+    }
+
+    @Test
+    void dailyStatsAggregatesMultipleClicksAcrossDaysDescending() {
+        String url = "https://example.com/daily-multi-" + System.nanoTime();
+        var created = service.shorten(url);
+
+        service.resolveAndRecordClick(created.code());
+        service.resolveAndRecordClick(created.code());
+
+        var daily = service.dailyStats(created.code());
+        assertThat(daily).hasSize(1);
+        assertThat(daily.get(0).clicks()).isEqualTo(2L);
+        assertThat(daily.get(0).date()).matches("\\d{4}-\\d{2}-\\d{2}");
+    }
+
+    @Test
+    void dailyStatsUnknownCodeThrowsNotFound() {
+        assertThatThrownBy(() -> service.dailyStats("zzzzzzx"))
+                .isInstanceOf(CodeNotFoundException.class);
+    }
+
+    @Test
+    void dailyStatsSyntacticallyInvalidCodeThrowsNotFound() {
+        assertThatThrownBy(() -> service.dailyStats("!!!"))
+                .isInstanceOf(CodeNotFoundException.class);
     }
 }

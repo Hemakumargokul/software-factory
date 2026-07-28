@@ -5,9 +5,11 @@ import com.factory.app.domain.ClickEvent;
 import com.factory.app.domain.UrlMapping;
 import com.factory.app.repository.ClickEventRepository;
 import com.factory.app.repository.UrlMappingRepository;
+import com.factory.app.web.DailyClickCount;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Instant;
+import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -97,6 +99,23 @@ public class UrlShortenerService {
 
     /** Result of a stats lookup. */
     public record StatsResult(String code, String url, long clicks) {
+    }
+
+    /**
+     * Read-only per-day click history for a code, ordered most-recent-day
+     * first. Verifies the code exists (throwing {@link CodeNotFoundException}
+     * for an unknown or syntactically invalid code, since {@link
+     * UrlMappingRepository#findByCode} simply finds no match for either) and
+     * then delegates aggregation entirely to {@link ClickEventRepository},
+     * mapping DB projections to {@link DailyClickCount} DTOs. Returns an
+     * empty list when the code exists but has zero recorded clicks.
+     */
+    @Transactional(readOnly = true)
+    public List<DailyClickCount> dailyStats(String code) {
+        repository.findByCode(code).orElseThrow(() -> new CodeNotFoundException(code));
+        return clickEventRepository.countDailyClicksByCode(code).stream()
+                .map(row -> new DailyClickCount(row.getClickDay(), row.getClickCount()))
+                .toList();
     }
 
     /**
