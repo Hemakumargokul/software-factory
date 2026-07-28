@@ -1452,3 +1452,77 @@ kill switch: stopping at stage boundary
 GateViolation: implement exit gate: implementer produced an empty diff
 [NOTE] During task with name 'implement' and id 
 '9c739f40-ef57-276e-6e44-31dce0402f15'
+● implement
+  T1 attempt 1 rejected: implement exit gate: implementer produced an empty diff
+● policy
+● tests
+● review
+● sync
+● implement
+  T1 implemented: 1 files changed (attempt 2)
+● policy
+● tests
+● review
+● sync
+● commit
+  T1 committed
+╭───────────────────────────── HUMAN GATE: merge ──────────────────────────────╮
+│ Merge T1 (Global exception handling for structured JSON errors) to main?     │
+│                                                                              │
+│ tests: pass                                                                  │
+│ policy: pass                                                                 │
+│ review_concerns: [                                                           │
+│   "Confirm 'log' is an already-defined logger field in this class (e.g. via  │
+│ Lombok @Slf4j or explicit SLF4J Logger); the diff doesn't show its           │
+│ declaration, so if it's newly introduced this should be visible in the full  │
+│ file.",                                                                      │
+│   "Logging e.getMessage() at debug level for malformed JSON is low-risk, but │
+│ ensure no sensitive request payload data is included in exception messages   │
+│ from the JSON parser in edge cases."                                         │
+│ ]                                                                            │
+│ commit_sha: 68007a1474015e566b80142e0df9a333ed1bdd19                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────── diff ────────────────────────────────────╮
+│ diff --git a/src/main/java/com/factory/app/web/GlobalExceptionHandler.java   │
+│ b/src/main/java/com/factory/app/web/GlobalExceptionHandler.java              │
+│ index 6660a18..08dcdb2 100644                                                │
+│ --- a/src/main/java/com/factory/app/web/GlobalExceptionHandler.java          │
+│ +++ b/src/main/java/com/factory/app/web/GlobalExceptionHandler.java          │
+│ @@ -42,6 +42,8 @@ public class GlobalExceptionHandler {                      │
+│      @ExceptionHandler(HttpMessageNotReadableException.class)                │
+│      public ResponseEntity<ErrorResponse> handleUnreadableBody(              │
+│              HttpMessageNotReadableException e, HttpServletRequest request)  │
+│ {                                                                            │
+│ +        log.debug("Malformed request body for {} {}: {}",                   │
+│ request.getMethod(), request.getRequestURI(),                                │
+│ +                e.getMessage());                                            │
+│          return build(HttpStatus.BAD_REQUEST, "Malformed request body",      │
+│ request);                                                                    │
+│      }                                                                       │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────── run a02b00b7 is paused ───────────────────────────╮
+│   factory approve a02b00b7                    # approve                      │
+│   factory approve a02b00b7 --revise "..."     # request changes              │
+│   factory approve a02b00b7 --reject           # reject                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+● gate_merge
+  human: approve merge of T1
+● integrate
+  T1 merged to main
+● implement
+  T2 implemented: 5 files changed (attempt 1)
+● policy
+● tests
+● review
+● sync
+● implement
+  T2 implemented: 5 files changed (attempt 2)
+kill switch: stopping at stage boundary
+╭───────────────────────────────── run killed ─────────────────────────────────╮
+│ run stopped by kill switch                                                   │
+│ checkpointed at the last completed stage; sandbox preserved:                 │
+│ /tmp/factory/a02b00b7                                                        │
+│ resume with: factory kill a02b00b7 --clear && factory resume a02b00b7        │
+╰──────────────────────────────────────────────────────────────────────────────╯

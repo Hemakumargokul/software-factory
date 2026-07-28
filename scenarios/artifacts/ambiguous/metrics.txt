@@ -1,30 +1,32 @@
-           run a02b00b7 — paused           
+           run a02b00b7 — killed           
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
 ┃ metric                     ┃      value ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
 │ scenario                   │ brownfield │
-│ end-to-end latency         │   1318.76s │
-│ verification success rate  │    100.00% │
-│ first-attempt success rate │    100.00% │
-│ retries                    │          0 │
-│ rollbacks                  │          0 │
-│ MTTR                       │          - │
-│ unresolved failures        │          0 │
-│ agent cost                 │      $1.45 │
+│ end-to-end latency         │   2512.15s │
+│ verification success rate  │     80.95% │
+│ first-attempt success rate │     83.33% │
+│ retries                    │          4 │
+│ rollbacks                  │          1 │
+│ MTTR                       │    603.20s │
+│ unresolved failures        │          1 │
+│ agent cost                 │      $5.56 │
 └────────────────────────────┴────────────┘
      per-stage time      
 ┏━━━━━━━━━━━━━━┳━━━━━━━━┓
 ┃ stage        ┃  total ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━┩
-│ implement    │ 167.4s │
+│ implement    │ 913.7s │
+│ review       │ 204.6s │
+│ tests        │ 100.7s │
 │ impact       │  77.2s │
 │ design       │  55.5s │
+│ decompose    │  40.3s │
 │ requirements │  35.1s │
-│ review       │  27.1s │
 │ intake       │  25.0s │
-│ decompose    │  19.5s │
-│ tests        │  12.2s │
-│ policy       │   0.6s │
+│ policy       │   3.0s │
 │ bootstrap    │   0.3s │
-│ commit       │   0.1s │
+│ commit       │   0.2s │
+│ integrate    │   0.2s │
+│ rollback     │   0.1s │
 └──────────────┴────────┘
