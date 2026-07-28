@@ -22,9 +22,9 @@ public interface ClickEventRepository extends JpaRepository<ClickEvent, Long> {
      * that date for the queried code.
      */
     interface DailyCount {
-        String getDay();
+        String getClickDay();
 
-        long getCount();
+        long getClickCount();
     }
 
     /**
@@ -34,12 +34,12 @@ public interface ClickEventRepository extends JpaRepository<ClickEvent, Long> {
      * {@code Instant}, so the grouping is independent of server/session time
      * zone.
      */
-    @Query(value = "SELECT FORMATDATETIME(ce.clicked_at_utc, 'yyyy-MM-dd', 'UTC') AS day, "
-            + "COUNT(*) AS count "
+    @Query(value = "SELECT FORMATDATETIME(ce.clicked_at_utc, 'yyyy-MM-dd', 'UTC') AS click_day, "
+            + "COUNT(*) AS click_count "
             + "FROM click_event ce "
             + "WHERE ce.code = :code "
-            + "GROUP BY day "
-            + "ORDER BY day DESC",
+            + "GROUP BY click_day "
+            + "ORDER BY click_day DESC",
             nativeQuery = true)
     List<DailyCount> countDailyClicksByCode(@Param("code") String code);
 }

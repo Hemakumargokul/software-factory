@@ -41,7 +41,7 @@ class ClickEventRepositoryTest {
         Instant day3Start = Instant.parse("2024-03-12T00:00:00Z");
 
         // Unrelated code, must not be included in the aggregation for `code`.
-        repository.saveAndFlush(new ClickEvent("other001", day2Mid));
+        repository.saveAndFlush(new ClickEvent("other01", day2Mid));
 
         repository.saveAndFlush(new ClickEvent(code, day1Start));
         repository.saveAndFlush(new ClickEvent(code, day1Late));
@@ -54,14 +54,14 @@ class ClickEventRepositoryTest {
 
         assertThat(results).hasSize(3);
 
-        assertThat(results.get(0).getDay()).isEqualTo("2024-03-12");
-        assertThat(results.get(0).getCount()).isEqualTo(1L);
+        assertThat(results.get(0).getClickDay()).isEqualTo("2024-03-12");
+        assertThat(results.get(0).getClickCount()).isEqualTo(1L);
 
-        assertThat(results.get(1).getDay()).isEqualTo("2024-03-11");
-        assertThat(results.get(1).getCount()).isEqualTo(3L);
+        assertThat(results.get(1).getClickDay()).isEqualTo("2024-03-11");
+        assertThat(results.get(1).getClickCount()).isEqualTo(3L);
 
-        assertThat(results.get(2).getDay()).isEqualTo("2024-03-10");
-        assertThat(results.get(2).getCount()).isEqualTo(2L);
+        assertThat(results.get(2).getClickDay()).isEqualTo("2024-03-10");
+        assertThat(results.get(2).getClickCount()).isEqualTo(2L);
     }
 
     @Test
@@ -75,9 +75,9 @@ class ClickEventRepositoryTest {
         var resultsB = repository.countDailyClicksByCode("codeB01");
 
         assertThat(resultsA).hasSize(1);
-        assertThat(resultsA.get(0).getCount()).isEqualTo(1L);
+        assertThat(resultsA.get(0).getClickCount()).isEqualTo(1L);
 
         assertThat(resultsB).hasSize(1);
-        assertThat(resultsB.get(0).getCount()).isEqualTo(2L);
+        assertThat(resultsB.get(0).getClickCount()).isEqualTo(2L);
     }
 }
