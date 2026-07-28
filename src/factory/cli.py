@@ -155,6 +155,27 @@ def status(run_id: str):
 
 
 @app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", help="Bind address"),
+    port: int = typer.Option(8500, help="Port (8500 avoids the product's 8188)"),
+):
+    """Serve the web UI: run dashboard, HITL gates, artifacts, tracing links."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print(
+            "[red]UI dependencies missing[/red] — install with: "
+            "pip install -e '.[ui]'"
+        )
+        raise typer.Exit(1)
+    from factory.web.app import _apply_langfuse_defaults
+
+    _apply_langfuse_defaults()  # every UI-started run is traced by default
+    console.print(f"factory UI: [bold]http://{host}:{port}[/bold]")
+    uvicorn.run("factory.web.app:app", host=host, port=port, log_level="warning")
+
+
+@app.command()
 def metrics(run_id: str = typer.Argument(None)):
     """Reliability metrics: one run's report, or the run index."""
     if run_id is None:

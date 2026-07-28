@@ -13,6 +13,8 @@ builds a Java Spring Boot URL shortener.
 
 Start with [docs/architecture.md](docs/architecture.md) (the system as
 built), then [docs/testing-approach.md](docs/testing-approach.md).
+[docs/code-quality-assessment.md](docs/code-quality-assessment.md) is an
+honest review of the product code the factory produced.
 [docs/plan.md](docs/plan.md) and
 [docs/implementation-plan.md](docs/implementation-plan.md) are the original
 design and build plans.
@@ -99,6 +101,25 @@ factory metrics                # index of all runs
 factory metrics <run_id>       # success rate, retries, rollbacks, MTTR, latency
 ```
 
+## Web UI
+
+```bash
+pip install -e ".[ui]"
+factory ui                     # http://127.0.0.1:8500
+```
+
+Everything above, in the browser: start runs, watch stages stream live,
+answer human gates (approve / request changes / reject) with the spec,
+design or merge diff rendered inline, browse the sandbox's code files and
+working-tree diff, read the metrics report and engineering summary, and
+jump to the run's Langfuse session. The server sets the Langfuse dev keys
+by default, so every UI-started run is traced without any per-terminal
+exports. Drive a given run from one place at a time — the UI or the CLI,
+not both.
+
+The frontend is prebuilt into `src/factory/web/static/`; rebuilding it
+needs Node 20+ (`cd ui && npm install && npm run build`).
+
 ## Observability (optional)
 
 ```bash
@@ -143,5 +164,5 @@ templates/                product scaffolds seeded at bootstrap
 tests/factory/            orchestrator unit tests (SDK roles mocked)
 tests/acceptance/         black-box HTTP contract tests for the product
 scenarios/                the three assignment scenarios plus captured artifacts
-docs/                     architecture, testing approach, original plans
+docs/                     architecture, testing approach, code quality assessment, original plans
 ```
