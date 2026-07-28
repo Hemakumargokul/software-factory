@@ -379,3 +379,1076 @@
 JsonExtractionError: no parseable JSON object in role reply
 [NOTE] During task with name 'impact' and id 
 '86647aa2-06a2-adb8-db15-13e401cad888'
+● impact
+  impact analysis: 8 files affected, 6 regression risks
+● design
+  The service remains a single Spring Boot 3.5 deployable on Java 21, listening 
+on port 8188, with no new layers introduced — only reinforcement of existing 
+ones. Request flow: HTTP request -> ShortenRateLimitFilter (Servlet Filter, 
+unchanged, runs outside DispatcherServlet exception machinery, scoped
+╭───────────────────────────── HUMAN GATE: design ─────────────────────────────╮
+│ Approve architecture, API contract and data model?                           │
+│                                                                              │
+│ design: {                                                                    │
+│   "architecture": "The service remains a single Spring Boot 3.5 deployable   │
+│ on Java 21, listening on port 8188, with no new layers introduced \u2014     │
+│ only reinforcement of existing ones. Request flow: HTTP request ->           │
+│ ShortenRateLimitFilter (Servlet Filter, unchanged, runs outside              │
+│ DispatcherServlet exception machinery, scoped only to POST /api/shorten) ->  │
+│ DispatcherServlet -> Controllers (ShortenController, RedirectController,     │
+│ StatsController) -> Service/CodeGenerator layer -> Spring Data JPA           │
+│ UrlMappingRepository -> H2 embedded database, now configured in file-based   │
+│ mode (jdbc:h2:file:./data/urlshortener or similar path under a configurable  │
+│ data directory) instead of jdbc:h2:mem:, so both URL mappings and click      │
+│ counters (already columns on the JPA-managed UrlMapping entity, not a        │
+│ separate HashMap) survive JVM restarts via H2's on-disk .mv.db file.         │
+│ Cross-cutting error handling is centralized in GlobalExceptionHandler        │
+│ (@RestControllerAdvice), which intercepts exceptions thrown by               │
+│ controllers/services (HttpMessageNotReadableException for malformed JSON,    │
+│ CodeNotFoundException for missing codes, InvalidUrlException for validation, │
+│ and a new catch-all Exception handler) and converts them into a structured   │
+│ ErrorResponse record containing timestamp, status, error, message, and path, │
+│ serialized as JSON with the correct HTTP status. Because the rate limiter    │
+│ filter runs before dispatch and writes its own response body directly, it is │
+│ structurally isolated from this advice and its 429 behavior is untouched.    │
+│ Observability is extended by leaning entirely on Spring Boot Actuator's      │
+│ auto-configured DataSourceHealthIndicator, which Spring already wires up     │
+│ because a DataSource bean is present; no custom HealthIndicator class is     │
+│ needed \u2014 only application.properties tuning                             │
+│ (management.endpoint.health.show-details, exposure include) to ensure the    │
+│ 'db' component is visible in /actuator/health responses. All changes are     │
+│ additive/config-level, preserving existing endpoint paths, request/response  │
+│ schemas, and validation rules.",                                             │
+│   "components": [                                                            │
+│     {                                                                        │
+│       "name": "ShortenRateLimitFilter",                                      │
+│       "responsibility": "Existing OncePerRequestFilter scoped to POST        │
+│ /api/shorten via shouldNotFilter; enforces rate limits and writes raw JSON   │
+│ 429 responses directly, before DispatcherServlet; left completely unmodified │
+│ to guarantee FR6."                                                           │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "ShortenController / RedirectController / StatsController",    │
+│       "responsibility": "Existing REST controllers exposing POST             │
+│ /api/shorten, GET /{code}, GET /api/stats/{code}; unchanged request/response │
+│ contracts; throw domain exceptions (InvalidUrlException,                     │
+│ CodeNotFoundException) that propagate to GlobalExceptionHandler; no direct   │
+│ persistence logic changes required since JPA-backed repository access is     │
+│ already in place."                                                           │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "UrlMapping (JPA entity) & UrlMappingRepository",              │
+│       "responsibility": "Existing @Entity with unique constraints on         │
+│ code/original_url and click-count field, accessed via Spring Data            │
+│ repository; no schema change required, only underlying storage mode changes  │
+│ from mem: to file: so state persists across restarts (FR7/FR8)."             │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "CodeGenerator",                                               │
+│       "responsibility": "Existing component that seeds its counter from DB   │
+│ max id at startup; behavior already compatible with file-based persistence   │
+│ \u2014 on restart it will correctly resume from the last persisted id        │
+│ instead of resetting, verified via new restart test."                        │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "GlobalExceptionHandler (@RestControllerAdvice)",              │
+│       "responsibility": "Central exception-to-HTTP-response translator;      │
+│ extended to (a) enrich ErrorResponse with                                    │
+│ timestamp/status/error/message/path fields for existing 400/404 handlers,    │
+│ and (b) add a catch-all @ExceptionHandler(Exception.class) mapping to 500    │
+│ with a generic, non-leaking message, satisfying FR1-FR5 without touching     │
+│ success-path DTOs."                                                          │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "ErrorResponse (record/DTO)",                                  │
+│       "responsibility": "Structured error body shape: timestamp, status      │
+│ (int), error (existing field name preserved for backward test                │
+│ compatibility), message, path. Backward-compatible superset of the current   │
+│ {\"error\": ...} shape so existing jsonPath('$.error') assertions keep       │
+│ passing."                                                                    │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "application.properties (main)",                               │
+│       "responsibility": "Datasource URL switched to file-based H2 (e.g.      │
+│ jdbc:h2:file:./data/urlshortener;DB_CLOSE_ON_EXIT=FALSE), retaining          │
+│ server.port=8188; management.endpoints.web.exposure.include=health (or       │
+│ health,info) and management.endpoint.health.show-details=always (or          │
+│ when-authorized, per test expectations) to surface the 'db' component."      │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "application.properties (test)",                               │
+│       "responsibility": "Remains in-memory (random/unique mem: URL per run)  │
+│ for fast, isolated unit/integration tests unrelated to persistence-restart   │
+│ behavior; comment updated to clarify this divergence from prod config is     │
+│ intentional."                                                                │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "Spring Boot auto-configured DataSourceHealthIndicator",       │
+│       "responsibility": "Built-in actuator component (no custom code) that   │
+│ pings the DataSource (H2) via a validation query and reports UP/DOWN as the  │
+│ 'db' node under /actuator/health, aggregated into overall status per default │
+│ Actuator rules \u2014 directly satisfies FR9/FR10 with zero new              │
+│ dependencies."                                                               │
+│     },                                                                       │
+│     {                                                                        │
+│       "name": "RestartPersistenceIntegrationTest (new)",                     │
+│       "responsibility": "New test class using a dedicated file-based H2 URL  │
+│ (via @DynamicPropertySource or @TestPropertySource pointing at a JUnit       │
+│ @TempDir path) that: starts context, creates a short URL, shuts down         │
+│ context, restarts context pointed at the same file path, and asserts the     │
+│ mapping and click-count are still retrievable \u2014 black-box proof of      │
+│ FR7/FR8."                                                                    │
+│     }                                                                        │
+│   ],                                                                         │
+│   "api_contract": [                                                          │
+│     {                                                                        │
+│       "method": "POST",                                                      │
+│       "path": "/api/shorten",                                                │
+│       "request": "JSON body { url: string } (existing schema, unchanged)",   │
+│       "response": "existing success schema unchanged on 200/201; on          │
+│ malformed JSON -> structured ErrorResponse; on validation failure ->         │
+│ structured ErrorResponse",                                                   │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         201,                                                                 │
+│         400,                                                                 │
+│         429,                                                                 │
+│         500                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/{code}",                                                     │
+│       "request": "path variable code",                                       │
+│       "response": "HTTP redirect (Location header) unchanged on success;     │
+│ structured ErrorResponse JSON on unknown code",                              │
+│       "status_codes": [                                                      │
+│         302,                                                                 │
+│         404,                                                                 │
+│         500                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/api/stats/{code}",                                           │
+│       "request": "path variable code",                                       │
+│       "response": "existing stats JSON schema unchanged on success;          │
+│ structured ErrorResponse JSON on unknown code",                              │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         404,                                                                 │
+│         500                                                                  │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "method": "GET",                                                       │
+│       "path": "/actuator/health",                                            │
+│       "request": "none",                                                     │
+│       "response": "existing top-level {status: ...} shape plus               │
+│ components.db.{status} node (when show-details enabled); overall status      │
+│ reflects db state per default aggregation",                                  │
+│       "status_codes": [                                                      │
+│         200,                                                                 │
+│         503                                                                  │
+│       ]                                                                      │
+│     }                                                                        │
+│   ],                                                                         │
+│   "data_model": [                                                            │
+│     {                                                                        │
+│       "entity": "UrlMapping (existing JPA entity, unchanged schema)",        │
+│       "fields": [                                                            │
+│         "id: Long (PK)",                                                     │
+│         "code: String (unique)",                                             │
+│         "originalUrl: String (unique)",                                      │
+│         "clickCount: long",                                                  │
+│         "createdAt: Instant (if already present)"                            │
+│       ]                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "entity": "ErrorResponse (extended DTO, not a JPA entity)",            │
+│       "fields": [                                                            │
+│         "timestamp: Instant/String",                                         │
+│         "status: int",                                                       │
+│         "error: String (preserved field name)",                              │
+│         "message: String",                                                   │
+│         "path: String"                                                       │
+│       ]                                                                      │
+│     }                                                                        │
+│   ],                                                                         │
+│   "alternatives_considered": [                                               │
+│     "Custom HealthIndicator bean for H2 instead of relying on                │
+│ auto-configured DataSourceHealthIndicator \u2014 rejected as                 │
+│ redundant/higher-risk; Spring Boot already provides this for any DataSource  │
+│ on the classpath, adding a custom one risks naming collision with the        │
+│ default 'db' indicator and violates the 'prefer standard framework'          │
+│ constraint.",                                                                │
+│     "Migrating persistence to a fully separate embedded key-value store or   │
+│ file-based custom serialization (e.g., writing HashMap to disk via Java      │
+│ serialization) instead of H2 file mode \u2014 rejected: introduces bespoke   │
+│ persistence code, higher risk of data corruption on crash, and contradicts   │
+│ the constraint of using the already-approved H2 dependency; JPA/H2 file mode │
+│ is a one-line config change with ACID guarantees.",                          │
+│     "Wrapping the rate limiter filter logic into the                         │
+│ @RestControllerAdvice/DispatcherServlet exception flow for consistency       │
+│ \u2014 rejected: would require re-architecting a filter that already works   │
+│ correctly and is explicitly required (FR6) to remain untouched; the          │
+│ isolation is a feature, not a bug.",                                         │
+│     "Replacing ErrorResponse with an entirely new field name/shape (e.g.,    │
+│ dropping 'error' in favor of 'reason') \u2014 rejected: would break existing │
+│ passing tests (ShortenControllerWebTest, ShortenRateLimitIntegrationTest)    │
+│ that assert jsonPath('$.error'), violating FR11's 'no observable change'     │
+│ requirement.",                                                               │
+│     "Using an in-memory H2 mode with periodic manual snapshot/dump to disk   │
+│ (e.g., SCRIPT TO) triggered on shutdown hook \u2014 rejected: fragile        │
+│ against ungraceful termination (kill -9, crash), whereas native file-mode H2 │
+│ persists continuously and is simpler and more robust."                       │
+│   ],                                                                         │
+│   "risks": [                                                                 │
+│     {                                                                        │
+│       "risk": "Switching to jdbc:h2:file: mode introduces file locking       │
+│ issues if the application is restarted while a previous JVM instance's H2    │
+│ file lock (.lock.db) has not been released, or if two instances run          │
+│ concurrently against the same file.",                                        │
+│       "impact": "Application fails to start or throws a database lock        │
+│ exception, causing an outage on redeploy.",                                  │
+│       "mitigation": "Ensure single-instance deployment assumption is         │
+│ documented; use DB_CLOSE_ON_EXIT=FALSE with a proper shutdown hook so H2     │
+│ releases the lock cleanly on SIGTERM; add a startup health check/log         │
+│ warning; document recommended graceful shutdown via actuator/shutdown or     │
+│ systemd stop semantics."                                                     │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "The file-based H2 database directory (e.g. ./data) may not    │
+│ exist or may be read-only in the deployment/container environment, or may    │
+│ not be included in the container volume mapping, silently losing persistence │
+│ guarantees despite tests passing locally.",                                  │
+│       "impact": "FR7/FR8 appear satisfied in dev/test but silently regress   │
+│ to ephemeral storage in production containers without persistent volumes.",  │
+│       "mitigation": "Use an absolute, externally configurable path via a     │
+│ property (e.g. app.datasource.path or reuse spring.datasource.url with env   │
+│ override), fail-fast at startup if the directory can't be created/written,   │
+│ and document the requirement for a mounted persistent volume in deployment   │
+│ notes."                                                                      │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Enriching ErrorResponse with new fields (timestamp, status,   │
+│ path) while keeping 'error' could still break brittle tests or client        │
+│ integrations that assert an exact JSON body (e.g., via strict                │
+│ deserialization or JSON equality) rather than jsonPath field checks.",       │
+│       "impact": "Existing tests fail or downstream consumers doing strict    │
+│ schema validation break, violating FR11.",                                   │
+│       "mitigation": "Confirm via grep/search that all existing tests use     │
+│ jsonPath (partial field assertions) not full-body equals; add new fields as  │
+│ additive-only; run full existing test suite before/after change as a         │
+│ regression gate."                                                            │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Adding a catch-all @ExceptionHandler(Exception.class) for     │
+│ 500s may unintentionally swallow or reclassify exceptions that Spring's      │
+│ default mechanisms (e.g., NoHandlerFoundException, 405 Method Not Allowed)   │
+│ currently handle differently, changing status codes for edge cases not       │
+│ explicitly in scope.",                                                       │
+│       "impact": "Unexpected status code regressions for unrelated error      │
+│ paths (e.g., unsupported HTTP methods returning 500 instead of 405).",       │
+│       "mitigation": "Order handlers by specificity (keep existing specific   │
+│ handlers for InvalidUrlException, HttpMessageNotReadableException,           │
+│ CodeNotFoundException, and add specific handlers for common Spring MVC       │
+│ exceptions like                                                              │
+│ HttpRequestMethodNotSupportedException/NoHandlerFoundException before the    │
+│ generic catch-all) and add regression tests covering method-not-allowed and  │
+│ unknown-route cases."                                                        │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Enabling management.endpoint.health.show-details=always may   │
+│ expose sensitive details (e.g., datasource URL, validation query) to         │
+│ unauthenticated callers of /actuator/health in production.",                 │
+│       "impact": "Information disclosure risk if actuator is publicly         │
+│ reachable.",                                                                 │
+│       "mitigation": "Use show-details=when-authorized combined with a        │
+│ security config if available, or restrict exposure to internal networks;     │
+│ alternatively keep only status-level detail publicly and gate full component │
+│ detail behind existing security constraints if any exist in the scaffold."   │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Test suite's use of a separate in-memory H2 URL for tests (to │
+│ preserve isolation) diverges from production's file-based config, so a bug   │
+│ introduced by file-mode-specific behavior (e.g., H2 file dialect quirks,     │
+│ auto-DDL differences) may not be caught by the standard test suite.",        │
+│       "impact": "Persistence bugs (FR7/FR8) ship undetected because most     │
+│ tests never exercise file mode.",                                            │
+│       "mitigation": "Add the dedicated RestartPersistenceIntegrationTest     │
+│ using a real file-based H2 URL pointed at a JUnit @TempDir, explicitly       │
+│ exercising create -> restart -> retrieve for both mappings and click counts, │
+│ run as part of the standard CI test phase."                                  │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "CodeGenerator's counter-seeding logic (max id from DB) could  │
+│ race with concurrent requests immediately after restart before the seed      │
+│ query completes, or could seed incorrectly if H2 file mode changes id        │
+│ generation strategy behavior (e.g., IDENTITY vs SEQUENCE) compared to mem    │
+│ mode.",                                                                      │
+│       "impact": "Duplicate or colliding short codes generated after restart, │
+│ violating the unique constraint and causing 500s on create.",                │
+│       "mitigation": "Verify id generation strategy is DB-agnostic (e.g.,     │
+│ GenerationType.IDENTITY works identically in both H2 modes); include an      │
+│ explicit test asserting no unique-constraint violation occurs for the first  │
+│ create after a restart; keep seeding logic in a startup-blocking             │
+│ @PostConstruct/ApplicationRunner to avoid serving traffic before seed        │
+│ completes."                                                                  │
+│     },                                                                       │
+│     {                                                                        │
+│       "risk": "Filesystem growth / .mv.db file size increasing unboundedly   │
+│ over time in a long-running service with no compaction, since H2 file mode   │
+│ never shrinks automatically.",                                               │
+│       "impact": "Disk exhaustion over long uptime in production, potential   │
+│ outage.",                                                                    │
+│       "mitigation": "Out of scope for this iteration but document as an      │
+│ operational follow-up (periodic H2 SHUTDOWN COMPACT or scheduled maintenance │
+│ window); not required to satisfy current FRs but flagged as a known          │
+│ operational risk."                                                           │
+│     }                                                                        │
+│   ]                                                                          │
+│ }                                                                            │
+│ risks: [                                                                     │
+│   {                                                                          │
+│     "risk": "Extending ErrorResponse's JSON shape (adding                    │
+│ timestamp/status/message/path per FR4) could remove, rename, or reorder the  │
+│ existing top-level 'error' field that ShortenControllerWebTest and           │
+│ ShortenRateLimitIntegrationTest already assert on via jsonPath('$.error').", │
+│     "impact": "Existing passing tests break, and any external client         │
+│ currently parsing {\"error\": ...} would silently stop working, violating    │
+│ FR11 (no observable change to success/error contract fields already in       │
+│ use).",                                                                      │
+│     "mitigation": "Add new fields alongside the existing 'error' key rather  │
+│ than replacing it, or confirm with black-box tests that 'error' remains      │
+│ present and non-empty after the change; add explicit regression tests        │
+│ asserting both old and new fields together."                                 │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Switching spring.datasource.url from jdbc:h2:mem:... to         │
+│ jdbc:h2:file:... changes DB lifecycle semantics (file locking,               │
+│ working-directory dependency, leftover .mv.db files between test/CI runs)    │
+│ and could affect the CodeGenerator's @PostConstruct counter seeding if a     │
+│ stale file with old data is picked up unexpectedly.",                        │
+│     "impact": "Local dev/CI runs could fail to start (file lock contention   │
+│ if two instances point at the same file path, e.g. running tests and the app │
+│ concurrently) or produce nondeterministic code generation if seeded from     │
+│ stale leftover data.",                                                       │
+│     "mitigation": "Use a distinct, explicit file path (e.g. under an         │
+│ app-managed data directory) for the main app only; keep test configuration   │
+│ on isolated mem: or per-test-run unique file paths; add .gitignore entries   │
+│ for the DB file; add a black-box restart test that starts the app, creates   │
+│ data, stops, restarts, and asserts data is still present, run in CI with a   │
+│ clean/temp directory."                                                       │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Adding a catch-all @ExceptionHandler(Exception.class) for       │
+│ FR3/500 could inadvertently intercept exceptions that Spring's own default   │
+│ handling currently manages specially (e.g. NoHandlerFoundException/404 for   │
+│ truly unmapped routes, HttpRequestMethodNotSupportedException/405), changing │
+│ their status codes to 500 if not scoped carefully.",                         │
+│     "impact": "Unrelated existing behaviors for unmapped paths or wrong HTTP │
+│ methods could regress from their current (default Spring Boot) status codes  │
+│ to a blanket 500, which is an unintended observable contract change          │
+│ (violates FR11's spirit even if not explicitly tested today).",              │
+│     "mitigation": "Order @ExceptionHandler methods from most-specific to     │
+│ generic Exception.class (Spring already does this via most-specific-match),  │
+│ add explicit tests for unmapped-path and wrong-method requests to confirm    │
+│ their status codes are unaffected, and keep the catch-all narrowly scoped to │
+│ truly unexpected runtime exceptions."                                        │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "Enabling more detail on /actuator/health (component-level       │
+│ breakdown for FR9/FR10) may require                                          │
+│ management.endpoint.health.show-details=always (or similar), which by        │
+│ default also exposes other auto-configured health indicators/details beyond  │
+│ just 'db', potentially leaking more information than intended.",             │
+│     "impact": "Overexposure of internal health details (e.g. disk space      │
+│ thresholds, other future indicators) in a publicly reachable                 │
+│ /actuator/health endpoint, beyond what FR9 asks for.",                       │
+│     "mitigation": "Scope show-details narrowly (e.g.                         │
+│ show-details=when-authorized is not applicable for anonymous black-box       │
+│ tests, so prefer 'always' only if acceptable, or use                         │
+│ management.endpoint.health.group config to expose just the db indicator) and │
+│ add a test asserting exactly the expected top-level keys are present without │
+│ unexpected extra sensitive fields."                                          │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "The rate limiter filter's raw JSON error body ({\"error\":      │
+│ \"...\"}) is written directly via HttpServletResponse in                     │
+│ ShortenRateLimitFilter, bypassing GlobalExceptionHandler entirely; if a      │
+│ future refactor consolidates error-body construction (e.g. reusing the new   │
+│ structured ErrorResponse type) without care, it could accidentally route     │
+│ 429s through the ControllerAdvice path or change their body/headers.",       │
+│     "impact": "Violates FR6 (rate limiter response must remain fully         │
+│ unchanged) if the 429 body shape changes to include the new                  │
+│ timestamp/status/path fields inconsistently with what's already tested.",    │
+│     "mitigation": "Explicitly leave ShortenRateLimitFilter's own             │
+│ JSON-writing logic untouched; if body shape is unified for consistency,      │
+│ update ShortenRateLimitIntegrationTest deliberately and confirm FR6 intent   │
+│ with the spec owner before altering 429 body shape at all."                  │
+│   },                                                                         │
+│   {                                                                          │
+│     "risk": "CodeGenerator.seedCounter() calls repository.findAll() at       │
+│ startup to compute max id; on a file-based DB that has accumulated many rows │
+│ across restarts (no longer reset each run as with mem: mode), this           │
+│ full-table scan grows over time.",                                           │
+│     "impact": "Slower application startup as the persisted dataset grows     │
+│ across restarts in file-based mode, a latent performance regression not      │
+│ present under the previous always-empty mem: mode.",                         │
+│     "mitigation": "Acceptable for now given NFR scope is about               │
+│ request-latency not startup time, but flag for a future optimization (e.g. a │
+│ MAX(id) query instead of findAll()) if startup time becomes noticeable; not  │
+│ required by this spec's FRs but worth noting as a side effect of FR7."       │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Switching to jdbc:h2:file: mode introduces file locking issues  │
+│ if the application is restarted while a previous JVM instance's H2 file lock │
+│ (.lock.db) has not been released, or if two instances run concurrently       │
+│ against the same file.",                                                     │
+│     "impact": "Application fails to start or throws a database lock          │
+│ exception, causing an outage on redeploy.",                                  │
+│     "mitigation": "Ensure single-instance deployment assumption is           │
+│ documented; use DB_CLOSE_ON_EXIT=FALSE with a proper shutdown hook so H2     │
+│ releases the lock cleanly on SIGTERM; add a startup health check/log         │
+│ warning; document recommended graceful shutdown via actuator/shutdown or     │
+│ systemd stop semantics."                                                     │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "The file-based H2 database directory (e.g. ./data) may not      │
+│ exist or may be read-only in the deployment/container environment, or may    │
+│ not be included in the container volume mapping, silently losing persistence │
+│ guarantees despite tests passing locally.",                                  │
+│     "impact": "FR7/FR8 appear satisfied in dev/test but silently regress to  │
+│ ephemeral storage in production containers without persistent volumes.",     │
+│     "mitigation": "Use an absolute, externally configurable path via a       │
+│ property (e.g. app.datasource.path or reuse spring.datasource.url with env   │
+│ override), fail-fast at startup if the directory can't be created/written,   │
+│ and document the requirement for a mounted persistent volume in deployment   │
+│ notes."                                                                      │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Enriching ErrorResponse with new fields (timestamp, status,     │
+│ path) while keeping 'error' could still break brittle tests or client        │
+│ integrations that assert an exact JSON body (e.g., via strict                │
+│ deserialization or JSON equality) rather than jsonPath field checks.",       │
+│     "impact": "Existing tests fail or downstream consumers doing strict      │
+│ schema validation break, violating FR11.",                                   │
+│     "mitigation": "Confirm via grep/search that all existing tests use       │
+│ jsonPath (partial field assertions) not full-body equals; add new fields as  │
+│ additive-only; run full existing test suite before/after change as a         │
+│ regression gate."                                                            │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Adding a catch-all @ExceptionHandler(Exception.class) for 500s  │
+│ may unintentionally swallow or reclassify exceptions that Spring's default   │
+│ mechanisms (e.g., NoHandlerFoundException, 405 Method Not Allowed) currently │
+│ handle differently, changing status codes for edge cases not explicitly in   │
+│ scope.",                                                                     │
+│     "impact": "Unexpected status code regressions for unrelated error paths  │
+│ (e.g., unsupported HTTP methods returning 500 instead of 405).",             │
+│     "mitigation": "Order handlers by specificity (keep existing specific     │
+│ handlers for InvalidUrlException, HttpMessageNotReadableException,           │
+│ CodeNotFoundException, and add specific handlers for common Spring MVC       │
+│ exceptions like                                                              │
+│ HttpRequestMethodNotSupportedException/NoHandlerFoundException before the    │
+│ generic catch-all) and add regression tests covering method-not-allowed and  │
+│ unknown-route cases."                                                        │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Enabling management.endpoint.health.show-details=always may     │
+│ expose sensitive details (e.g., datasource URL, validation query) to         │
+│ unauthenticated callers of /actuator/health in production.",                 │
+│     "impact": "Information disclosure risk if actuator is publicly           │
+│ reachable.",                                                                 │
+│     "mitigation": "Use show-details=when-authorized combined with a security │
+│ config if available, or restrict exposure to internal networks;              │
+│ alternatively keep only status-level detail publicly and gate full component │
+│ detail behind existing security constraints if any exist in the scaffold."   │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Test suite's use of a separate in-memory H2 URL for tests (to   │
+│ preserve isolation) diverges from production's file-based config, so a bug   │
+│ introduced by file-mode-specific behavior (e.g., H2 file dialect quirks,     │
+│ auto-DDL differences) may not be caught by the standard test suite.",        │
+│     "impact": "Persistence bugs (FR7/FR8) ship undetected because most tests │
+│ never exercise file mode.",                                                  │
+│     "mitigation": "Add the dedicated RestartPersistenceIntegrationTest using │
+│ a real file-based H2 URL pointed at a JUnit @TempDir, explicitly exercising  │
+│ create -> restart -> retrieve for both mappings and click counts, run as     │
+│ part of the standard CI test phase."                                         │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "CodeGenerator's counter-seeding logic (max id from DB) could    │
+│ race with concurrent requests immediately after restart before the seed      │
+│ query completes, or could seed incorrectly if H2 file mode changes id        │
+│ generation strategy behavior (e.g., IDENTITY vs SEQUENCE) compared to mem    │
+│ mode.",                                                                      │
+│     "impact": "Duplicate or colliding short codes generated after restart,   │
+│ violating the unique constraint and causing 500s on create.",                │
+│     "mitigation": "Verify id generation strategy is DB-agnostic (e.g.,       │
+│ GenerationType.IDENTITY works identically in both H2 modes); include an      │
+│ explicit test asserting no unique-constraint violation occurs for the first  │
+│ create after a restart; keep seeding logic in a startup-blocking             │
+│ @PostConstruct/ApplicationRunner to avoid serving traffic before seed        │
+│ completes."                                                                  │
+│   },                                                                         │
+│   {                                                                          │
+│     "stage": "design",                                                       │
+│     "risk": "Filesystem growth / .mv.db file size increasing unboundedly     │
+│ over time in a long-running service with no compaction, since H2 file mode   │
+│ never shrinks automatically.",                                               │
+│     "impact": "Disk exhaustion over long uptime in production, potential     │
+│ outage.",                                                                    │
+│     "mitigation": "Out of scope for this iteration but document as an        │
+│ operational follow-up (periodic H2 SHUTDOWN COMPACT or scheduled maintenance │
+│ window); not required to satisfy current FRs but flagged as a known          │
+│ operational risk."                                                           │
+│   }                                                                          │
+│ ]                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────── run a02b00b7 is paused ───────────────────────────╮
+│   factory approve a02b00b7                    # approve                      │
+│   factory approve a02b00b7 --revise "..."     # request changes              │
+│   factory approve a02b00b7 --reject           # reject                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+● gate_design
+  human: approve
+● decompose
+  3 tasks: T1, T2, T3
+● implement
+  T1 implemented: 5 files changed (attempt 1)
+kill switch: stopping at stage boundary
+╭───────────────────────────────── run killed ─────────────────────────────────╮
+│ run stopped by kill switch                                                   │
+│ checkpointed at the last completed stage; sandbox preserved:                 │
+│ /tmp/factory/a02b00b7                                                        │
+│ resume with: factory kill a02b00b7 --clear && factory resume a02b00b7        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+● policy
+● tests
+● review
+● sync
+● commit
+  T1 committed
+╭───────────────────────────── HUMAN GATE: merge ──────────────────────────────╮
+│ Merge T1 (Global exception handling with structured error responses) to      │
+│ main?                                                                        │
+│                                                                              │
+│ tests: pass                                                                  │
+│ policy: pass                                                                 │
+│ review_concerns: [                                                           │
+│   "ErrorResponse is now a breaking schema change (record field order         │
+│ changed, 'error' field semantics preserved but new required fields added);   │
+│ confirm existing clients only assert on 'error' as documented, since any     │
+│ strict schema validators elsewhere could fail.",                             │
+│   "Catch-all @ExceptionHandler(Exception.class) will also intercept Spring's │
+│ NoHandlerFoundException/404-for-unknown-routes and any framework exceptions  │
+│ (e.g. HttpRequestMethodNotSupportedException for wrong HTTP verb), returning │
+│ 500 instead of a more appropriate 404/405 \u2014 worth confirming this is    │
+│ intended and doesn't regress RedirectController's unmapped-path behavior.",  │
+│   "The catch-all uses HttpServletRequest.getRequestURI() for 'path' but does │
+│ not verify behavior when request body is unreadable and getRequestURI()      │
+│ might behave oddly with forwarded/error dispatches; low risk but untested    │
+│ edge case.",                                                                 │
+│   "New test file appears truncated in the diff (ends mid-line with '.a'), so │
+│ full review of GlobalExceptionHandlerIntegrationTest assertions (including   │
+│ the forced-500 test-only endpoint) isn't possible from the given diff."      │
+│ ]                                                                            │
+│ commit_sha: 2c939d1eb445d1ce6e9ef9b157215a2b2fd031e1                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────── diff ────────────────────────────────────╮
+│ diff --git a/src/main/java/com/factory/app/web/ErrorResponse.java            │
+│ b/src/main/java/com/factory/app/web/ErrorResponse.java                       │
+│ index 72e09fc..15e7973 100644                                                │
+│ --- a/src/main/java/com/factory/app/web/ErrorResponse.java                   │
+│ +++ b/src/main/java/com/factory/app/web/ErrorResponse.java                   │
+│ @@ -1,8 +1,26 @@                                                             │
+│  package com.factory.app.web;                                                │
+│                                                                              │
+│ +import java.time.Instant;                                                   │
+│ +                                                                            │
+│  /**                                                                         │
+│ - * Uniform JSON error body shape used by all error responses:               │
+│ - * {"error": "<message>"}.                                                  │
+│ + * Structured JSON error body returned by {@link GlobalExceptionHandler}    │
+│ for                                                                          │
+│ + * every handled failure (malformed request bodies, validation failures,    │
+│ + * unknown short codes, and unexpected server errors).                      │
+│ + *                                                                          │
+│ + * <p>{@code error} is kept as the primary human-readable reason and        │
+│ mirrors                                                                      │
+│ + * {@code message} for backward compatibility with existing clients/tests   │
+│ + * that only assert on {@code $.error}. {@code timestamp}, {@code status},  │
+│ + * {@code message}, and {@code path} satisfy FR4 of the error-handling      │
+│ + * specification.</p>                                                       │
+│   */                                                                         │
+│ -public record ErrorResponse(String error) {                                 │
+│ +public record ErrorResponse(Instant timestamp, int status, String error,    │
+│ String message, String path) {                                               │
+│ +                                                                            │
+│ +    /**                                                                     │
+│ +     * Convenience factory that stamps the current time and derives both    │
+│ +     * {@code error} (the reason phrase, e.g. "Bad Request") and            │
+│ +     * {@code message} (the human-readable detail) consistently.            │
+│ +     */                                                                     │
+│ +    public static ErrorResponse of(int status, String reason, String        │
+│ message, String path) {                                                      │
+│ +        return new ErrorResponse(Instant.now(), status, reason, message,    │
+│ path);                                                                       │
+│ +    }                                                                       │
+│  }                                                                           │
+│ diff --git a/src/main/java/com/factory/app/web/GlobalExceptionHandler.java   │
+│ b/src/main/java/com/factory/app/web/GlobalExceptionHandler.java              │
+│ index 615a5ce..6660a18 100644                                                │
+│ --- a/src/main/java/com/factory/app/web/GlobalExceptionHandler.java          │
+│ +++ b/src/main/java/com/factory/app/web/GlobalExceptionHandler.java          │
+│ @@ -2,6 +2,9 @@ package com.factory.app.web;                                 │
+│                                                                              │
+│  import com.factory.app.service.CodeNotFoundException;                       │
+│  import com.factory.app.service.InvalidUrlException;                         │
+│ +import jakarta.servlet.http.HttpServletRequest;                             │
+│ +import org.slf4j.Logger;                                                    │
+│ +import org.slf4j.LoggerFactory;                                             │
+│  import org.springframework.http.HttpStatus;                                 │
+│  import org.springframework.http.ResponseEntity;                             │
+│  import org.springframework.http.converter.HttpMessageNotReadableException;  │
+│ @@ -9,24 +12,59 @@ import                                                    │
+│ org.springframework.web.bind.annotation.ExceptionHandler;                    │
+│  import org.springframework.web.bind.annotation.RestControllerAdvice;        │
+│                                                                              │
+│  /**                                                                         │
+│ - * Translates service-layer and request-parsing failures into the uniform   │
+│ - * {"error": "<message>"} JSON body required by the API contract.           │
+│ + * Central translator from controller/service-layer exceptions to a uniform │
+│ + * structured {@link ErrorResponse} JSON body with the correct HTTP status. │
+│ + *                                                                          │
+│ + * <p>Handles malformed JSON request bodies ({@link                         │
+│ HttpMessageNotReadableException}                                             │
+│ + * -&gt; 400), validation failures ({@link InvalidUrlException} -&gt; 400), │
+│ unknown                                                                      │
+│ + * short codes ({@link CodeNotFoundException} -&gt; 404), and a catch-all   │
+│ for any                                                                      │
+│ + * other unhandled exception (-&gt; 500) with a generic, non-leaking        │
+│ message.</p>                                                                 │
+│ + *                                                                          │
+│ + * <p>This advice only intercepts exceptions that propagate out of          │
+│ + * {@code DispatcherServlet}-dispatched controller methods. {@link          │
+│ + * com.factory.app.ratelimit.ShortenRateLimitFilter} runs as a servlet      │
+│ filter                                                                       │
+│ + * before dispatch and writes its 429 response directly, so it is           │
+│ structurally                                                                 │
+│ + * isolated from this class and its behavior is completely unaffected       │
+│ + * (FR6).</p>                                                               │
+│   */                                                                         │
+│  @RestControllerAdvice                                                       │
+│  public class GlobalExceptionHandler {                                       │
+│                                                                              │
+│ +    private static final Logger log =                                       │
+│ LoggerFactory.getLogger(GlobalExceptionHandler.class);                       │
+│ +    private static final String GENERIC_SERVER_ERROR_MESSAGE =              │
+│ +            "An unexpected error occurred. Please try again later.";        │
+│ +                                                                            │
+│      @ExceptionHandler(InvalidUrlException.class)                            │
+│ -    public ResponseEntity<ErrorResponse>                                    │
+│ handleInvalidUrl(InvalidUrlException e) {                                    │
+│ -        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new       │
+│ ErrorResponse(e.getMessage()));                                              │
+│ +    public ResponseEntity<ErrorResponse>                                    │
+│ handleInvalidUrl(InvalidUrlException e, HttpServletRequest request) {        │
+│ +        return build(HttpStatus.BAD_REQUEST, e.getMessage(), request);      │
+│      }                                                                       │
+│                                                                              │
+│      @ExceptionHandler(HttpMessageNotReadableException.class)                │
+│ -    public ResponseEntity<ErrorResponse>                                    │
+│ handleUnreadableBody(HttpMessageNotReadableException e) {                    │
+│ -        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new       │
+│ ErrorResponse("Malformed request body"));                                    │
+│ +    public ResponseEntity<ErrorResponse> handleUnreadableBody(              │
+│ +            HttpMessageNotReadableException e, HttpServletRequest request)  │
+│ {                                                                            │
+│ +        return build(HttpStatus.BAD_REQUEST, "Malformed request body",      │
+│ request);                                                                    │
+│      }                                                                       │
+│                                                                              │
+│      @ExceptionHandler(CodeNotFoundException.class)                          │
+│ -    public ResponseEntity<ErrorResponse>                                    │
+│ handleCodeNotFound(CodeNotFoundException e) {                                │
+│ -        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new         │
+│ ErrorResponse(e.getMessage()));                                              │
+│ +    public ResponseEntity<ErrorResponse>                                    │
+│ handleCodeNotFound(CodeNotFoundException e, HttpServletRequest request) {    │
+│ +        return build(HttpStatus.NOT_FOUND, e.getMessage(), request);        │
+│ +    }                                                                       │
+│ +                                                                            │
+│ +    /**                                                                     │
+│ +     * Catch-all safety net for any exception not handled above. Logs the   │
+│ +     * full exception server-side for diagnosability but returns only a     │
+│ +     * generic message to the client, never a stack trace or internal class │
+│ +     * name (FR3).                                                          │
+│ +     */                                                                     │
+│ +    @ExceptionHandler(Exception.class)                                      │
+│ +    public ResponseEntity<ErrorResponse> handleUnexpected(Exception e,      │
+│ HttpServletRequest request) {                                                │
+│ +        log.error("Unhandled exception while processing {} {}",             │
+│ request.getMethod(), request.getRequestURI(), e);                            │
+│ +        return build(HttpStatus.INTERNAL_SERVER_ERROR,                      │
+│ GENERIC_SERVER_ERROR_MESSAGE, request);                                      │
+│ +    }                                                                       │
+│ +                                                                            │
+│ +    private ResponseEntity<ErrorResponse> build(HttpStatus status, String   │
+│ message, HttpServletRequest request) {                                       │
+│ +        ErrorResponse body = ErrorResponse.of(status.value(),               │
+│ status.getReasonPhrase(), message,                                           │
+│ +                request.getRequestURI());                                   │
+│ +        return ResponseEntity.status(status).body(body);                    │
+│      }                                                                       │
+│  }                                                                           │
+│ diff --git                                                                   │
+│ a/src/test/java/com/factory/app/ratelimit/ShortenRateLimitIntegrationTest.ja │
+│ va                                                                           │
+│ b/src/test/java/com/factory/app/ratelimit/ShortenRateLimitIntegrationTest.ja │
+│ va                                                                           │
+│ index 8ddb2db..03674e1 100644                                                │
+│ ---                                                                          │
+│ a/src/test/java/com/factory/app/ratelimit/ShortenRateLimitIntegrationTest.ja │
+│ va                                                                           │
+│ +++                                                                          │
+│ b/src/test/java/com/factory/app/ratelimit/ShortenRateLimitIntegrationTest.ja │
+│ va                                                                           │
+│ @@ -81,6 +81,51 @@ class ShortenRateLimitIntegrationTest {                   │
+│          org.assertj.core.api.Assertions.assertThat(node.get("error").asText │
+│ ()).isNotBlank();                                                            │
+│      }                                                                       │
+│                                                                              │
+│ +    /**                                                                     │
+│ +     * FR6: {@link GlobalExceptionHandler} must never intercept or alter    │
+│ the                                                                          │
+│ +     * rate limiter's own 429 response. The filter runs before              │
+│ +     * DispatcherServlet and writes its raw {@code {"error": "..."}} body   │
+│ +     * directly, so a 429 response must have exactly that shape -- no       │
+│ +     * {@code status}/{@code message}/{@code path}/{@code timestamp} fields │
+│ +     * that the structured {@link com.factory.app.web.ErrorResponse} would  │
+│ +     * add if this request had instead gone through the global advice.      │
+│ +     */                                                                     │
+│ +    @Test                                                                   │
+│ +    void                                                                    │
+│ rateLimitResponseBodyRemainsRawAndUnstructuredByGlobalExceptionHandler()     │
+│ throws Exception {                                                           │
+│ +        MvcResult rejected = null;                                          │
+│ +        for (int i = 0; i < 45 && rejected == null; i++) {                  │
+│ +            String url = "https://example.com/rate-limit-raw-shape-" +      │
+│ System.nanoTime();                                                           │
+│ +            MvcResult result = mockMvc.perform(post("/api/shorten")         │
+│ +                            .contentType(MediaType.APPLICATION_JSON)        │
+│ +                                                                            │
+│ .content(objectMapper.writeValueAsString(Map.of("url", url))))               │
+│ +                    .andReturn();                                           │
+│ +            if (result.getResponse().getStatus() == 429) {                  │
+│ +                rejected = result;                                          │
+│ +            }                                                               │
+│ +        }                                                                   │
+│ +                                                                            │
+│ +        org.assertj.core.api.Assertions.assertThat(rejected)                │
+│ +                .as("expected to observe at least one 429 to assert its raw │
+│ body shape")                                                                 │
+│ +                .isNotNull();                                               │
+│ +                                                                            │
+│ +                                                                            │
+│ org.assertj.core.api.Assertions.assertThat(rejected.getResponse().getContent │
+│ Type())                                                                      │
+│ +                .contains("application/json");                              │
+│ +                                                                            │
+│ +        var node =                                                          │
+│ objectMapper.readTree(rejected.getResponse().getContentAsString());          │
+│ +                                                                            │
+│ org.assertj.core.api.Assertions.assertThat(node.has("error")).isTrue();      │
+│ +                                                                            │
+│ org.assertj.core.api.Assertions.assertThat(node.get("error").asText()).isNot │
+│ Blank();                                                                     │
+│ +                                                                            │
+│ +        // The filter's raw body must be exactly the one-field shape it     │
+│ +        // writes itself -- none of GlobalExceptionHandler/ErrorResponse's  │
+│ +        // extra fields should be present, proving the advice never touched │
+│ +        // this response.                                                   │
+│ +                                                                            │
+│ org.assertj.core.api.Assertions.assertThat(node.has("status")).isFalse();    │
+│ +                                                                            │
+│ org.assertj.core.api.Assertions.assertThat(node.has("message")).isFalse();   │
+│ +                                                                            │
+│ org.assertj.core.api.Assertions.assertThat(node.has("path")).isFalse();      │
+│ +                                                                            │
+│ org.assertj.core.api.Assertions.assertThat(node.has("timestamp")).isFalse(); │
+│ +                                                                            │
+│ org.assertj.core.api.Assertions.assertThat(node.size()).isEqualTo(1);        │
+│ +    }                                                                       │
+│ +                                                                            │
+│      /**                                                                     │
+│       * FR12 sanity check: even after saturating the POST /api/shorten limit │
+│       * for this client, GET /{code}, GET /api/stats/{code}, and             │
+│ diff --git                                                                   │
+│ a/src/test/java/com/factory/app/web/GlobalExceptionHandlerIntegrationTest.ja │
+│ va                                                                           │
+│ b/src/test/java/com/factory/app/web/GlobalExceptionHandlerIntegrationTest.ja │
+│ va                                                                           │
+│ new file mode 100644                                                         │
+│ index 0000000..5021e60                                                       │
+│ --- /dev/null                                                                │
+│ +++                                                                          │
+│ b/src/test/java/com/factory/app/web/GlobalExceptionHandlerIntegrationTest.ja │
+│ va                                                                           │
+│ @@ -0,0 +1,124 @@                                                            │
+│ +package com.factory.app.web;                                                │
+│ +                                                                            │
+│ +import static org.hamcrest.Matchers.equalTo;                                │
+│ +import static org.hamcrest.Matchers.not;                                    │
+│ +import static                                                               │
+│ org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;     │
+│ +import static                                                               │
+│ org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;    │
+│ +import static                                                               │
+│ org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;  │
+│ +import static                                                               │
+│ org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;    │
+│ +                                                                            │
+│ +import com.fasterxml.jackson.databind.ObjectMapper;                         │
+│ +import java.util.Map;                                                       │
+│ +import org.junit.jupiter.api.Test;                                          │
+│ +import org.springframework.beans.factory.annotation.Autowired;              │
+│ +import                                                                      │
+│ org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc │
+│ ;                                                                            │
+│ +import org.springframework.boot.test.context.SpringBootTest;                │
+│ +import org.springframework.boot.test.context.TestConfiguration;             │
+│ +import org.springframework.context.annotation.Import;                       │
+│ +import org.springframework.http.MediaType;                                  │
+│ +import org.springframework.test.web.servlet.MockMvc;                        │
+│ +import org.springframework.web.bind.annotation.GetMapping;                  │
+│ +import org.springframework.web.bind.annotation.RestController;              │
+│ +                                                                            │
+│ +/**                                                                         │
+│ + * MockMvc-based integration coverage of {@link GlobalExceptionHandler}     │
+│ wired                                                                        │
+│ + * into the full application context, hitting the real                      │
+│ create/redirect/stats                                                        │
+│ + * endpoints with malformed JSON and unknown codes, plus a dedicated        │
+│ + * test-only endpoint to force an unexpected 500, asserting the full        │
+│ + * structured {@link ErrorResponse} JSON body and status code in each case. │
+│ + */                                                                         │
+│ +@SpringBootTest                                                             │
+│ +@AutoConfigureMockMvc                                                       │
+│ +@Import(GlobalExceptionHandlerIntegrationTest.FailingEndpointConfig.class)  │
+│ +class GlobalExceptionHandlerIntegrationTest {                               │
+│ +                                                                            │
+│ +    @Autowired                                                              │
+│ +    private MockMvc mockMvc;                                                │
+│ +                                                                            │
+│ +    private final ObjectMapper objectMapper = new ObjectMapper();           │
+│ +                                                                            │
+│ +    @Test                                                                   │
+│ +    void createEndpointMalformedJsonReturns400StructuredBody() throws       │
+│ Exception {                                                                  │
+│ +        mockMvc.perform(post("/api/shorten")                                │
+│ +                        .contentType(MediaType.APPLICATION_JSON)            │
+│ +                        .content("{not valid json"))                        │
+│ +                .andExpect(status().isBadRequest())                         │
+│ +                .andExpect(jsonPath("$.status", equalTo(400)))              │
+│ +                .andExpect(jsonPath("$.error", not(equalTo(""))))           │
+│ +                .andExpect(jsonPath("$.message", not(equalTo(""))))         │
+│ +                .andExpect(jsonPath("$.path", equalTo("/api/shorten")))     │
+│ +                .a                                                          │
+│ ...                                                                          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────── run a02b00b7 is paused ───────────────────────────╮
+│   factory approve a02b00b7                    # approve                      │
+│   factory approve a02b00b7 --revise "..."     # request changes              │
+│   factory approve a02b00b7 --reject           # reject                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+● gate_merge
+  human: approve merge of T1
+● integrate
+  T1 merged to main
+● implement
+  T2 implemented: 4 files changed (attempt 1)
+● policy
+● tests
+● review
+● sync
+● implement
+  T2 implemented: 5 files changed (attempt 2)
+● policy
+● tests
+● review
+● sync
+● implement
+  T2 implemented: 7 files changed (attempt 3)
+● policy
+● tests
+● review
+● sync
+● rollback
+  rolled back T2 to ee37a21a8847
+● decompose
+  3 tasks: T1, T2, T3
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /Users/hgokulakannan/sites/software-factory/src/factory/cli.py:111 in        │
+│ approve                                                                      │
+│                                                                              │
+│   108 │   │   answer = {"action": "revise", "edits": revise}                 │
+│   109 │   else:                                                              │
+│   110 │   │   answer = {"action": "approve"}                                 │
+│ ❱ 111 │   asyncio.run(_drive(run_id, Command(resume=answer), auto=auto))     │
+│   112                                                                        │
+│   113                                                                        │
+│   114 @app.command()                                                         │
+│                                                                              │
+│ /opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions │
+│ /3.13/lib/python3.13/asyncio/runners.py:195 in run                           │
+│                                                                              │
+│   192 │   │   │   "asyncio.run() cannot be called from a running event       │
+│       loop")                                                                 │
+│   193 │                                                                      │
+│   194 │   with Runner(debug=debug, loop_factory=loop_factory) as runner:     │
+│ ❱ 195 │   │   return runner.run(main)                                        │
+│   196                                                                        │
+│   197                                                                        │
+│   198 def _cancel_all_tasks(loop):                                           │
+│                                                                              │
+│ /opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions │
+│ /3.13/lib/python3.13/asyncio/runners.py:118 in run                           │
+│                                                                              │
+│   115 │   │                                                                  │
+│   116 │   │   self._interrupt_count = 0                                      │
+│   117 │   │   try:                                                           │
+│ ❱ 118 │   │   │   return self._loop.run_until_complete(task)                 │
+│   119 │   │   except exceptions.CancelledError:                              │
+│   120 │   │   │   if self._interrupt_count > 0:                              │
+│   121 │   │   │   │   uncancel = getattr(task, "uncancel", None)             │
+│                                                                              │
+│ /opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions │
+│ /3.13/lib/python3.13/asyncio/base_events.py:725 in run_until_complete        │
+│                                                                              │
+│    722 │   │   if not future.done():                                         │
+│    723 │   │   │   raise RuntimeError('Event loop stopped before Future      │
+│        completed.')                                                          │
+│    724 │   │                                                                 │
+│ ❱  725 │   │   return future.result()                                        │
+│    726 │                                                                     │
+│    727 │   def stop(self):                                                   │
+│    728 │   │   """Stop running the event loop.                               │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/src/factory/cli.py:233 in _drive │
+│                                                                              │
+│   230 │   │   config = _config(run_id)                                       │
+│   231 │   │                                                                  │
+│   232 │   │   with tracing.run_context(run_id, f"factory:{run_id}"):         │
+│ ❱ 233 │   │   │   payload = await _stream(graph, graph_input, config,        │
+│       run_id)                                                                │
+│   234 │   │   │   while payload is not None and auto and not                 │
+│       control.is_killed(run_id):                                             │
+│   235 │   │   │   │   console.print("[yellow]--auto: approving gate "        │
+│   236 │   │   │   │   │   │   │     f"'{payload.get('gate')}'[/yellow]")     │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/src/factory/cli.py:282 in        │
+│ _stream                                                                      │
+│                                                                              │
+│   279 │   and no further stage is dispatched.                                │
+│   280 │   """                                                                │
+│   281 │   payload = None                                                     │
+│ ❱ 282 │   async for chunk in graph.astream(graph_input, config,              │
+│       stream_mode="updates"):                                                │
+│   283 │   │   for node, update in chunk.items():                             │
+│   284 │   │   │   if node == "__interrupt__":                                │
+│   285 │   │   │   │   payload = update[0].value                              │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/.venv/lib/python3.13/site-packag │
+│ es/langgraph/pregel/main.py:3440 in astream                                  │
+│                                                                              │
+│   3437 │   │   │   │   │   while loop.tick():                                │
+│   3438 │   │   │   │   │   │   for task in await                             │
+│        loop.amatch_cached_writes():                                          │
+│   3439 │   │   │   │   │   │   │   loop.output_writes(task.id, task.writes,  │
+│        cached=True)                                                          │
+│ ❱ 3440 │   │   │   │   │   │   async for _ in runner.atick(                  │
+│   3441 │   │   │   │   │   │   │   [t for t in loop.tasks.values() if not    │
+│        t.writes],                                                            │
+│   3442 │   │   │   │   │   │   │   timeout=self.step_timeout,                │
+│   3443 │   │   │   │   │   │   │   get_waiter=get_waiter,                    │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/.venv/lib/python3.13/site-packag │
+│ es/langgraph/pregel/_runner.py:396 in atick                                  │
+│                                                                              │
+│   393 │   │   │   t = tasks[0]                                               │
+│   394 │   │   │   scheduled_error_handler = False                            │
+│   395 │   │   │   try:                                                       │
+│ ❱ 396 │   │   │   │   await arun_with_retry(                                 │
+│   397 │   │   │   │   │   t,                                                 │
+│   398 │   │   │   │   │   retry_policy,                                      │
+│   399 │   │   │   │   │   stream=self.use_astream,                           │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/.venv/lib/python3.13/site-packag │
+│ es/langgraph/pregel/_retry.py:744 in arun_with_retry                         │
+│                                                                              │
+│   741 │   │   │   │   │   async for _ in task.proc.astream(task.input,       │
+│       config):                                                               │
+│   742 │   │   │   │   │   │   pass                                           │
+│   743 │   │   │   │   │   break                                              │
+│ ❱ 744 │   │   │   │   return await task.proc.ainvoke(task.input, config)     │
+│   745 │   │   │   result = await _arun_with_timeout(                         │
+│   746 │   │   │   │   task, config, resolved_timeout, attempt_ctx,           │
+│       stream=stream                                                          │
+│   747 │   │   │   )                                                          │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/.venv/lib/python3.13/site-packag │
+│ es/langgraph/_internal/_runnable.py:733 in ainvoke                           │
+│                                                                              │
+│   730 │   │   │   │   │   │   │   run = None                                 │
+│   731 │   │   │   │   │   │   # run in context                               │
+│   732 │   │   │   │   │   │   with set_config_context(config, run) as        │
+│       context:                                                               │
+│ ❱ 733 │   │   │   │   │   │   │   input = await asyncio.create_task(         │
+│   734 │   │   │   │   │   │   │   │   step.ainvoke(input, config, **kwargs), │
+│       context=context                                                        │
+│   735 │   │   │   │   │   │   │   )                                          │
+│   736 │   │   │   │   │   else:                                              │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/.venv/lib/python3.13/site-packag │
+│ es/langgraph/_internal/_runnable.py:501 in ainvoke                           │
+│                                                                              │
+│   498 │   │   │   else:                                                      │
+│   499 │   │   │   │   await run_manager.on_chain_end(ret)                    │
+│   500 │   │   else:                                                          │
+│ ❱ 501 │   │   │   ret = await self.afunc(*args, **kwargs)                    │
+│   502 │   │   if self.recurse and isinstance(ret, Runnable):                 │
+│   503 │   │   │   return await ret.ainvoke(input, config)                    │
+│   504 │   │   return ret                                                     │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/src/factory/stages/implement.py: │
+│ 178 in implement                                                             │
+│                                                                              │
+│   175 │   │   │   )                                                          │
+│   176 │   │   ],                                                             │
+│   177 │   }                                                                  │
+│ ❱ 178 │   gates.check_exit("implement", {**state, **update})                 │
+│   179 │   return update                                                      │
+│   180                                                                        │
+│                                                                              │
+│ /Users/hgokulakannan/sites/software-factory/src/factory/governance/gates.py: │
+│ 100 in check_exit                                                            │
+│                                                                              │
+│    97 │   if gate and gate.exit:                                             │
+│    98 │   │   violation = gate.exit(state)                                   │
+│    99 │   │   if violation:                                                  │
+│ ❱ 100 │   │   │   raise GateViolation(stage, "exit", violation)              │
+│   101                                                                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+GateViolation: implement exit gate: implementer produced an empty diff
+[NOTE] During task with name 'implement' and id 
+'9c739f40-ef57-276e-6e44-31dce0402f15'

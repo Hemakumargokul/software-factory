@@ -171,8 +171,15 @@ REPLAN_CONTEXT_PROMPT = Template("""
 THIS IS A RE-PLAN. The previous decomposition failed at task $failed_task
 and its work was rolled back. Produce a DIFFERENT decomposition that avoids
 the failure below — smaller steps, a different order, or a simpler approach.
+$integrated
 Failure summary:
 $failures
+""")
+
+REPLAN_INTEGRATED_PROMPT = Template("""
+ALREADY DELIVERED (merged to main and present in the codebase — do NOT plan
+tasks that redo this work; plan only what is still missing):
+$tasks
 """)
 
 CLARIFICATIONS_PROMPT = Template("""

@@ -175,5 +175,36 @@ async def implement(state: FactoryState) -> dict:
             )
         ],
     }
-    gates.check_exit("implement", {**state, **update})
+    try:
+        gates.check_exit("implement", {**state, **update})
+    except gates.GateViolation as violation:
+        # An empty diff is a failed ATTEMPT, not a dead run: the retry
+        # prompt carries the violation as failure context, and the bounded
+        # retry/rollback machinery decides what happens next.
+        update["stage_results"]["implement"] = {
+            "status": "fail",
+            "task": task["id"],
+            "files": files,
+            "report": str(violation),
+        }
+        update["decisions"] = [
+            record_decision(
+                stage="implement",
+                decision=f"{task['id']} attempt {attempt} rejected: {violation}",
+                rationale="exit gate violation becomes a failed attempt; "
+                "retry/rollback budgets decide what happens next",
+            )
+        ]
+        update["metric_events"] = [
+            metric_event(
+                "stage_end",
+                "implement",
+                ok=False,
+                task=task["id"],
+                attempt=attempt,
+                error="gate_violation",
+                cost_usd=result.cost_usd,
+                duration_s=round(time.monotonic() - started, 3),
+            )
+        ]
     return update

@@ -1,0 +1,30 @@
+           run a02b00b7 — paused           
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ metric                     ┃      value ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ scenario                   │ brownfield │
+│ end-to-end latency         │   1318.76s │
+│ verification success rate  │    100.00% │
+│ first-attempt success rate │    100.00% │
+│ retries                    │          0 │
+│ rollbacks                  │          0 │
+│ MTTR                       │          - │
+│ unresolved failures        │          0 │
+│ agent cost                 │      $1.45 │
+└────────────────────────────┴────────────┘
+     per-stage time      
+┏━━━━━━━━━━━━━━┳━━━━━━━━┓
+┃ stage        ┃  total ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━┩
+│ implement    │ 167.4s │
+│ impact       │  77.2s │
+│ design       │  55.5s │
+│ requirements │  35.1s │
+│ review       │  27.1s │
+│ intake       │  25.0s │
+│ decompose    │  19.5s │
+│ tests        │  12.2s │
+│ policy       │   0.6s │
+│ bootstrap    │   0.3s │
+│ commit       │   0.1s │
+└──────────────┴────────┘

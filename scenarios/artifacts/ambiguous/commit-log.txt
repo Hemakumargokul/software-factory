@@ -1,0 +1,6 @@
+*   ee37a21 (HEAD -> factory/t1, main, factory/t2) factory: integrate T1
+|\  
+| * 2c939d1 factory(T1): Global exception handling with structured error responses
+|/  
+* 20ce406 factory: seed from /tmp/factory/498f963c
+* e4a7bb9 factory: initial commit

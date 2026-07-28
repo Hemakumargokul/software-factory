@@ -9,7 +9,11 @@ from graphlib import CycleError, TopologicalSorter
 
 from factory.governance import gates
 from factory.observability import tracing
-from factory.agent.prompts import DECOMPOSE_PROMPT, REPLAN_CONTEXT_PROMPT
+from factory.agent.prompts import (
+    DECOMPOSE_PROMPT,
+    REPLAN_CONTEXT_PROMPT,
+    REPLAN_INTEGRATED_PROMPT,
+)
 from factory.stages.common import compact, run_reasoner
 from factory.state import FactoryState, metric_event, record_decision
 
@@ -40,12 +44,25 @@ def validate_and_order(tasks: list[dict]) -> list[dict]:
 
 
 def _replan_context(state: FactoryState) -> str:
-    """After a rollback, the new decomposition must know what failed."""
+    """After a rollback, the new decomposition must know what failed AND
+    what already merged — otherwise it re-plans delivered work and the
+    implementer, finding nothing to do, produces an empty diff."""
     replan = (state.get("stage_results") or {}).get("replan")
     if not replan:
         return ""
+    integrated = [
+        f"- {t['id']}: {t.get('title', '')}"
+        for t in state.get("tasks") or []
+        if t.get("status") == "integrated"
+    ]
+    integrated_block = (
+        REPLAN_INTEGRATED_PROMPT.substitute(tasks="\n".join(integrated))
+        if integrated
+        else ""
+    )
     return REPLAN_CONTEXT_PROMPT.substitute(
         failed_task=replan.get("task", "?"),
+        integrated=integrated_block,
         failures=compact(replan.get("failures", {}), limit=3000),
     )
 
