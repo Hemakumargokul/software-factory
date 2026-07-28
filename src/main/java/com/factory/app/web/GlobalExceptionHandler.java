@@ -42,6 +42,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadableBody(
             HttpMessageNotReadableException e, HttpServletRequest request) {
+        log.debug("Malformed request body for {} {}: {}", request.getMethod(), request.getRequestURI(),
+                e.getMessage());
         return build(HttpStatus.BAD_REQUEST, "Malformed request body", request);
     }
 
