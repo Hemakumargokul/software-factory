@@ -31,6 +31,15 @@ Written by hand against the pinned HTTP contract, run by the acceptance
 stage against the live service (packaged jar, own process group, health-poll,
 teardown in `finally`). The base URL arrives via `SHORTENER_URL`.
 
+The suite gates only the plan's FINAL task. It exams the entire contract,
+so an honest mid-plan increment would always flunk it — and every acceptance
+failure buys another paid implementation attempt. Intermediate tasks are
+judged by compile + unit tests + policy + review; the last task must leave
+the whole specification working end to end (the decompose prompt says so
+explicitly). If the service dies at boot, the failure report carries the
+tail of its boot log, so a bind failure or context error is visible to the
+human and to the retrying agent alike.
+
 Trust model: the suite lives in the orchestrator repo and never enters the
 sandbox. The agent is told the contract (it is pinned verbatim in the
 scenario goal) but never sees the exam. It asserts contract shape (status

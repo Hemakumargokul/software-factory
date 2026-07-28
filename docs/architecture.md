@@ -69,7 +69,8 @@ flowchart TD
     policyNode --> sync
     reviewNode --> sync
 
-    sync -->|pass| acceptance["acceptance: boot service, black-box HTTP suite"]
+    sync -->|"pass, final task"| acceptance["acceptance: boot service, black-box HTTP suite"]
+    sync -->|"pass, mid-plan task"| commitNode
     sync -->|"fail, attempts left"| implement
     sync -->|"policy violation / exhausted"| rollback
     acceptance -->|pass| commitNode["commit: SHA + run-id trailer"]
