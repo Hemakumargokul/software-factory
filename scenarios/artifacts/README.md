@@ -5,8 +5,17 @@ run log (every stage, gate and diff shown to the human), the sandbox's
 commit graph, reliability metrics, a Langfuse trace pointer, the product
 source tree as the run left it, and a `product.bundle` (`git clone
 product.bundle` reproduces the sandbox repository with every task branch
-and merge). Integrated product history is also kept as `product/<scenario>-<run-id>`
-branches of this repository.
+and merge).
+
+The agent-generated code is also browsable as branches of this repository
+— the integrated (merged-to-main) product history, one branch per run:
+
+- `product/greenfield-498f963c` — the complete URL shortener
+- `product/brownfield-2bfb10e8` — the shortener + per-day click analytics
+- `product/ambiguous-a02b00b7` — the shortener + reliability work merged so far
+
+`git checkout product/greenfield-498f963c` (or browse the branch on GitHub)
+to review exactly what the factory built, task merge by task merge.
 
 ## greenfield — run `498f963c` (completed, release-ready)
 
