@@ -1,30 +1,30 @@
-        run af07b819 — safe_stopped        
+        run 699b3ec3 — safe_stopped        
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
 ┃ metric                     ┃      value ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
 │ scenario                   │ greenfield │
-│ end-to-end latency         │   1641.44s │
-│ verification success rate  │     64.71% │
-│ first-attempt success rate │     71.43% │
-│ retries                    │          3 │
+│ end-to-end latency         │   1328.42s │
+│ verification success rate  │     75.00% │
+│ first-attempt success rate │     75.00% │
+│ retries                    │          4 │
 │ rollbacks                  │          2 │
-│ MTTR                       │    180.10s │
-│ unresolved failures        │          3 │
-│ agent cost                 │      $0.96 │
+│ MTTR                       │          - │
+│ unresolved failures        │          1 │
+│ agent cost                 │      $3.08 │
 └────────────────────────────┴────────────┘
      per-stage time      
 ┏━━━━━━━━━━━━━━┳━━━━━━━━┓
 ┃ stage        ┃  total ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━┩
-│ implement    │ 703.1s │
-│ acceptance   │ 126.6s │
-│ review       │ 123.4s │
-│ design       │  50.9s │
-│ decompose    │  46.9s │
-│ tests        │  35.9s │
-│ requirements │  31.8s │
-│ intake       │  18.9s │
-│ policy       │   0.8s │
+│ implement    │ 651.3s │
+│ acceptance   │ 378.9s │
+│ review       │ 138.0s │
+│ design       │  54.9s │
+│ tests        │  54.4s │
+│ decompose    │  47.3s │
+│ requirements │  36.9s │
+│ intake       │  19.4s │
+│ policy       │   1.2s │
 │ rollback     │   0.2s │
 │ bootstrap    │   0.2s │
 └──────────────┴────────┘

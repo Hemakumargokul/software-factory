@@ -43,15 +43,20 @@ JAVA_SPRINGBOOT = ProjectProfile(
         "Java 21 with Spring Boot 3 (Maven wrapper already present in the "
         "repository scaffold: pom.xml with spring-boot-starter-web, actuator "
         "and H2). Design ON this scaffold — do not propose a different "
-        "framework or build system."
+        "framework or build system. The service listens on port 8188 "
+        "(server.port is pinned in src/main/resources/application.properties "
+        "— keep that setting, do not move the service to another port)."
     ),
     scaffold_template=TEMPLATES_DIR / "java-springboot",
     build_cmd=("./mvnw", "-q", "-B", "compile"),
     test_cmd=("./mvnw", "-q", "-B", "test"),
     package_cmd=("./mvnw", "-q", "-B", "package", "-DskipTests"),
     run_cmd=("java", "-jar", "target/app.jar"),
-    health_url="http://127.0.0.1:8080/actuator/health",
-    service_port=8080,
+    # 8188, not 8080: dev machines routinely have something else (Apache,
+    # other dev servers) squatting on 8080, and the service dies silently
+    # when it cannot bind.
+    health_url="http://127.0.0.1:8188/actuator/health",
+    service_port=8188,
     dependency_files=("pom.xml",),
     dependency_allowlist=frozenset(
         {

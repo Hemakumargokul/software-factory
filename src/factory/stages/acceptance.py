@@ -96,19 +96,35 @@ async def acceptance(state: FactoryState) -> dict:
             span.update(output="package failed")
             return result("fail", f"PACKAGE:\n{package_tail}")
 
-        service = subprocess.Popen(
-            list(profile.run_cmd),
-            cwd=sandbox,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,  # own process group: killable as a unit
-        )
+        # Boot log lives NEXT TO the sandbox, not inside it, so it never
+        # dirties the product tree. Its tail rides into the failure report
+        # (and thus the retrying agent's prompt): a service that dies at
+        # startup — port already bound, context failure — is otherwise
+        # indistinguishable from one that is merely slow.
+        boot_log = Path(f"{sandbox}.boot.log")
+        with boot_log.open("w") as log_handle:
+            service = subprocess.Popen(
+                list(profile.run_cmd),
+                cwd=sandbox,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,  # own process group: killable as a unit
+            )
         try:
             if not _wait_healthy(profile.health_url, HEALTH_DEADLINE_S):
+                tail = "\n".join(
+                    boot_log.read_text(errors="replace").splitlines()[-40:]
+                )
+                exited = service.poll()
+                detail = (
+                    f"service exited with code {exited} before becoming healthy"
+                    if exited is not None
+                    else f"service never became healthy within {HEALTH_DEADLINE_S}s"
+                )
                 return result(
                     "fail",
-                    f"service never became healthy at {profile.health_url} "
-                    f"within {HEALTH_DEADLINE_S}s",
+                    f"{detail} (health: {profile.health_url})\n"
+                    f"BOOT LOG (tail):\n{tail}",
                 )
 
             base_url = f"http://127.0.0.1:{profile.service_port}"
