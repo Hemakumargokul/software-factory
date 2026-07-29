@@ -1,12 +1,10 @@
 ╭──────────────────────────────── run a02b00b7 ────────────────────────────────╮
 │ goal:     Make it more reliable.                                             │
-│ next:     ['tests', 'policy', 'review']                                      │
+│ next:     (finished)                                                         │
 │ task:     1/3                                                                │
-│ attempts: 2  replan_budget: 0                                                │
-│ spend:    $5.56 of $10.00 budget                                             │
+│ attempts: 0  replan_budget: -1                                               │
+│ spend:    $6.40 of $10.00 budget                                             │
 │ stages:   ['bootstrap', 'clarify', 'commit', 'decompose', 'design',          │
-│ 'gate_design', 'gate_merge', 'gate_requirements', 'impact', 'implement',     │
-│ 'intake', 'integrate', 'policy', 'replan', 'requirements', 'review',         │
-│ 'tests']                                                                     │
-│ KILLED — factory kill a02b00b7 --clear to make it resumable                  │
+│ 'gate_design', 'gate_requirements', 'impact', 'intake', 'integrate',         │
+│ 'replan', 'requirements', 'safe_stop']                                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯

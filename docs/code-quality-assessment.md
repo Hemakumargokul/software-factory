@@ -170,3 +170,13 @@ every concern is preserved in an auditable decision lineage attached to the
 merge gate where a human could act on it. The residual gaps are exactly the
 ones that slipped through an auto-approved gate — which is an argument for
 the human in the loop, not against the pipeline.
+
+A postscript proves the point. The ambiguous-scenario run (`a02b00b7`)
+later attempted to close the persistence gap (task T2: file-based H2), and
+the agent's own new `RestartPersistenceIntegrationTest` caught the
+counter-seeding flaw described above as a live defect — after a simulated
+restart, the generator re-issued an already-allocated code. Verification
+refused every attempt, the work was rolled back, and the run safe-stopped
+when its replan budget ran out. The flaw this assessment predicted on paper
+was demonstrated by a failing test and kept out of `main` by the controls
+(see `scenarios/artifacts/README.md`, ambiguous scenario).

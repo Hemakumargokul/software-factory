@@ -1,4 +1,4 @@
-*   d5c70e2 (HEAD -> factory/t2, main) factory: integrate T1
+*   d5c70e2 (HEAD -> main, factory/t2) factory: integrate T1
 |\  
 | * 68007a1 (factory/t1) factory(T1): Global exception handling for structured JSON errors
 |/  

@@ -146,6 +146,10 @@ scenarios/ambiguous.sh  /tmp/factory/<greenfield-id> # "Make it more reliable."
 
 Each captures its artifacts (run log, sandbox commit graph, engineering
 summary, metrics, trace pointer) into `scenarios/artifacts/<name>/`.
+Greenfield and brownfield end release-ready; the ambiguous run ends in a
+governed safe-stop after its verification caught a real defect and the
+replan budget ran out — the intended demonstration of the control stack
+(see [scenarios/artifacts/README.md](scenarios/artifacts/README.md)).
 
 ## Layout
 

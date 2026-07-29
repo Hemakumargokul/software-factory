@@ -1526,3 +1526,22 @@ kill switch: stopping at stage boundary
 │ /tmp/factory/a02b00b7                                                        │
 │ resume with: factory kill a02b00b7 --clear && factory resume a02b00b7        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
+● policy
+● tests
+● review
+● sync
+● implement
+  T2 implemented: 3 files changed (attempt 3)
+● policy
+● tests
+● review
+● sync
+● rollback
+  rolled back T2 to d5c70e23fd2d
+● safe_stop
+  run stopped: replan budget exhausted after rollback of T2
+╭────────────────────────────── run safe-stopped ──────────────────────────────╮
+│ replan budget exhausted after rollback of T2                                 │
+│ sandbox preserved: /tmp/factory/a02b00b7                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+metrics: factory metrics a02b00b7
