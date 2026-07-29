@@ -13,6 +13,30 @@ from factory.agent.prompts import JSON_ROLE_SYSTEM_PROMPT
 
 REPORT_TAIL_LINES = 100
 
+# Lines that mark the *cause* of a build/test failure. Surefire prints the
+# failing assertions mid-log; a blind tail keeps Maven's summary block and
+# Spring's condition report instead, so retries fix blind. (Observed: the
+# ambiguous run's T2 retries saw autoconfig noise, not the assertion.)
+FAILURE_MARKERS = (
+    "<<< FAILURE!",
+    "<<< ERROR!",
+    "AssertionError",
+    "ComparisonFailure",
+    "BUILD FAILURE",
+    "COMPILATION ERROR",
+)
+FAILURE_CONTEXT_LINES = 6   # lines kept after each marker (assertion detail)
+FAILURE_HIGHLIGHT_CAP = 60  # total highlight lines, so prompts stay bounded
+
+
+def _failure_highlights(lines: list[str]) -> list[str]:
+    """The marker lines plus their following context, deduplicated."""
+    keep: set[int] = set()
+    for i, line in enumerate(lines):
+        if any(marker in line for marker in FAILURE_MARKERS):
+            keep.update(range(i, min(i + 1 + FAILURE_CONTEXT_LINES, len(lines))))
+    return [lines[i] for i in sorted(keep)][:FAILURE_HIGHLIGHT_CAP]
+
 JSON_RETRY_NUDGE = (
     "\n\nIMPORTANT: your previous reply could not be parsed as JSON. "
     "Reply again with ONLY the JSON object requested above — no prose "
@@ -88,5 +112,16 @@ def run_command(
         return False, f"COMMAND NOT FOUND: {error}"
 
     output = (result.stdout or "") + (result.stderr or "")
-    tail = "\n".join(output.splitlines()[-REPORT_TAIL_LINES:])
-    return result.returncode == 0, tail
+    lines = output.splitlines()
+    tail = "\n".join(lines[-REPORT_TAIL_LINES:])
+    if result.returncode == 0:
+        return True, tail
+    highlights = _failure_highlights(lines[:-REPORT_TAIL_LINES])
+    if highlights:
+        tail = (
+            "FAILURE HIGHLIGHTS (extracted from earlier in the log):\n"
+            + "\n".join(highlights)
+            + "\n\nLOG TAIL:\n"
+            + tail
+        )
+    return False, tail

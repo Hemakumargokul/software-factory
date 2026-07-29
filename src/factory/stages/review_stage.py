@@ -34,6 +34,7 @@ async def review_stage(state: FactoryState) -> dict:
     prompt = REVIEW_PROMPT.substitute(
         task_id=task["id"],
         task_title=task["title"],
+        spec=compact(state["spec"]),
         design=compact(state["design"]),
         diff=diff,
     )

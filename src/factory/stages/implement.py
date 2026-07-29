@@ -61,12 +61,19 @@ async def implement(state: FactoryState) -> dict:
     else:
         git_ops.git(sandbox, "switch", branch)
 
+    impact_analysis = state.get("impact")
     prompt = IMPLEMENT_TASK_PROMPT.substitute(
         task_id=task["id"],
         task_title=task["title"],
         task_description=task.get("description", ""),
         spec=compact(state["spec"]),
         design=compact(state["design"]),
+        impact=(
+            "\nIMPACT ANALYSIS (existing integration points and regression "
+            f"risks your change must respect):\n{compact(impact_analysis)}"
+            if impact_analysis
+            else ""
+        ),
         failure_context=_failure_context(state),
     )
 

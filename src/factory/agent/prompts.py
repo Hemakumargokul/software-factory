@@ -112,10 +112,12 @@ DESIGN:
 $design
 $replan_context
 
-Rules: as few tasks as the scope honestly allows (1-4). Each task must be
-independently verifiable by building and running the test suite. Wire
-dependencies with depends_on (task ids). Every task includes writing its
-unit tests. The first task must produce a compilable application skeleton.
+Rules: prefer 2-4 tasks; a single task is allowed only when the scope is
+genuinely trivial, and its description must say why it cannot be split.
+Each task must be independently verifiable by building and running the
+test suite. Wire dependencies with depends_on (task ids). Every task
+includes writing its unit tests. The first task must produce a compilable
+application skeleton.
 
 How tasks are verified: intermediate tasks by compile + unit tests +
 review only; the FINAL task additionally by a black-box acceptance suite
@@ -158,6 +160,7 @@ $spec
 
 DESIGN (follow the API contract exactly):
 $design
+$impact
 $failure_context
 """)
 
@@ -196,10 +199,17 @@ $edits
 """)
 
 REVIEW_PROMPT = Template("""\
-Review this change as a senior engineer. You see the diff and the design;
-judge whether the change is correct, safe and consistent with the contract.
+Review this change as a senior engineer. You see the spec, the design and
+the diff; judge whether the change is correct, safe, consistent with the
+contract — and whether it actually delivers the task's scope. If the diff
+plainly does not implement what the task promises (e.g. endpoints or
+behavior the specification requires from this task are absent), say so as
+a concern; do not review only what is present.
 
 TASK: $task_id - $task_title
+
+SPECIFICATION (what the finished system must do):
+$spec
 
 DESIGN (the contract the change must honor):
 $design
