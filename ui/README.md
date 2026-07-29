@@ -18,10 +18,11 @@ finished runs). This folder is only the frontend.
 - Live updates arrive over Server-Sent Events from
   `/api/runs/{run_id}/events`; no polling.
 
-## Build (required before `factory ui` can serve the SPA)
+## Build
 
-The compiled bundle is **not** committed — `src/factory/web/static/` is
-gitignored, so on a fresh clone you must build once:
+The compiled bundle is committed at `src/factory/web/static/`, so a fresh
+clone can serve the UI with no Node toolchain. Rebuild only after changing
+frontend sources:
 
 ```bash
 cd ui
@@ -29,7 +30,7 @@ npm install
 npm run build     # tsc -b && vite build → ../src/factory/web/static/
 ```
 
-Then serve everything from one process, no node runtime needed:
+Serving is one process, no node runtime needed:
 
 ```bash
 pip install -e '.[ui]'

@@ -151,6 +151,31 @@ governed safe-stop after its verification caught a real defect and the
 replan budget ran out — the intended demonstration of the control stack
 (see [scenarios/artifacts/README.md](scenarios/artifacts/README.md)).
 
+## Run the product the factory built
+
+No Claude auth needed — the generated URL shortener is captured in the
+repo and runs standalone (JDK 21+ only):
+
+```bash
+cd scenarios/artifacts/brownfield/product   # shortener + daily analytics
+./mvnw package -DskipTests
+java -jar target/app.jar                    # serves on http://127.0.0.1:8188
+```
+
+Try it: `POST /api/shorten` (`{"url":"https://example.com"}`),
+`GET /{code}` (302 + click count), `GET /api/stats/{code}`,
+`GET /api/stats/{code}/daily`. Then run the hand-written black-box
+acceptance suite — the exam the coding agent never saw — against it:
+
+```bash
+SHORTENER_URL=http://127.0.0.1:8188 pytest tests/acceptance -q
+```
+
+`./mvnw test` inside the product runs the 60 unit/integration tests the
+agent wrote. The same tree is browsable as git branches
+(`product/greenfield-498f963c`, `product/brownfield-2bfb10e8`,
+`product/ambiguous-a02b00b7`).
+
 ## Layout
 
 ```
